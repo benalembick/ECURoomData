@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { floorNameFromCode, parseRoomCode } from '../lib/roomCode';
 import { findAttributeDefinitionForHeader, roomDataDictionaryByKey } from '../data/roomDataDictionary';
-import type { AttributeDefinition, Building, Campus, Room } from '../types';
+import type { AttributeDefinition, Building, Campus, Room, RoomPattern } from '../types';
 
 type JsonValue = string | number | boolean | string[];
 
@@ -38,6 +38,22 @@ interface DbAttributeDefinition {
   options: unknown;
 }
 
+interface DbRoomPattern {
+  id: string;
+  name: string;
+  description: string | null;
+  default_booking_rules: unknown;
+  default_o365_config: unknown;
+  timetabling_eligible: boolean;
+  ecu_av_patterns: string[] | null;
+  vizcom_av_patterns: string[] | null;
+  access_logic: unknown;
+  required_attribute_keys: string[] | null;
+  approval_requirements: unknown;
+  downstream_system_codes: string[] | null;
+  room_categories: { name: string } | null;
+}
+
 interface DbAttributeValue {
   room_id: string;
   attribute_definition_id: string;
@@ -53,6 +69,7 @@ export interface LoadedRoomData {
   rooms: Room[];
   campuses: Campus[];
   buildings: Building[];
+  patterns: RoomPattern[];
   attributes: AttributeDefinition[];
 }
 
@@ -67,7 +84,7 @@ export interface RoomDataLoadProgress {
 export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataLoadProgress) => void): Promise<LoadedRoomData | null> {
   if (!supabase) return null;
   const client = supabase;
-  const totalSteps = 6;
+  const totalSteps = 7;
   let completedSteps = 0;
 
   const reportProgress = (message: string, percent: number, loadedRows?: number) => {
@@ -95,9 +112,31 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     return result;
   };
 
-  const [campusResult, buildingResult, attributeResult, roomResult, valueResult, mappingResult] = await Promise.all([
+  const [campusResult, buildingResult, patternResult, attributeResult, roomResult, valueResult, mappingResult] = await Promise.all([
     loadDataset(() => client.from('campuses').select('code,name,address').eq('is_active', true).order('code'), 'campuses'),
     loadDataset(() => client.from('buildings').select('code,name,owner,campuses(code)').eq('is_active', true).order('code'), 'buildings'),
+    loadDataset(
+      () =>
+        client
+          .from('room_patterns')
+          .select(`
+            id,
+            name,
+            description,
+            default_booking_rules,
+            default_o365_config,
+            timetabling_eligible,
+            ecu_av_patterns,
+            vizcom_av_patterns,
+            access_logic,
+            required_attribute_keys,
+            approval_requirements,
+            downstream_system_codes,
+            room_categories(name)
+          `)
+          .order('name'),
+      'room patterns',
+    ),
     loadDataset(() => client.from('room_attribute_definitions').select('*').order('label'), 'attributes'),
     loadDataset(
       () =>
@@ -146,6 +185,22 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     name: building.name,
     campusCode: relationOne(building.campuses)?.code ?? '',
     owner: building.owner ?? '',
+  }));
+
+  const patterns: RoomPattern[] = ((patternResult.data ?? []) as unknown as DbRoomPattern[]).map((pattern) => ({
+    id: pattern.id,
+    name: pattern.name,
+    category: relationOne(pattern.room_categories)?.name ?? 'Unmapped',
+    description: pattern.description ?? '',
+    ecuAvPatterns: pattern.ecu_av_patterns ?? [],
+    vizcomAvPatterns: pattern.vizcom_av_patterns ?? [],
+    defaultBookingRules: jsonToList(pattern.default_booking_rules),
+    defaultO365Config: jsonToList(pattern.default_o365_config),
+    timetablingEligible: pattern.timetabling_eligible,
+    accessLogic: jsonToList(pattern.access_logic),
+    requiredAttributes: pattern.required_attribute_keys ?? [],
+    approvalRequirements: jsonToList(pattern.approval_requirements).map((role) => role.replace(/_/g, ' ')) as RoomPattern['approvalRequirements'],
+    downstreamSystems: pattern.downstream_system_codes ?? [],
   }));
 
   const dbAttributes = (attributeResult.data ?? []) as DbAttributeDefinition[];
@@ -233,7 +288,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
   });
 
   reportProgress(`Loaded ${rooms.length.toLocaleString()} rooms`, 100, rooms.length);
-  return { rooms, campuses, buildings, attributes };
+  return { rooms, campuses, buildings, patterns, attributes };
 }
 
 async function loadAllRows<T>(
@@ -277,4 +332,13 @@ function toUiAttributeType(type: string): AttributeDefinition['type'] {
     return type as AttributeDefinition['type'];
   }
   return 'text';
+}
+
+function jsonToList(value: unknown): string[] {
+  if (Array.isArray(value)) return value.map(String);
+  if (value && typeof value === 'object') {
+    return Object.entries(value as Record<string, unknown>).map(([key, item]) => `${key}: ${String(item)}`);
+  }
+  if (typeof value === 'string' && value.trim()) return [value];
+  return [];
 }

@@ -53,6 +53,8 @@ export interface RoomPattern {
   name: string;
   category: string;
   description: string;
+  ecuAvPatterns: string[];
+  vizcomAvPatterns: string[];
   defaultBookingRules: string[];
   defaultO365Config: string[];
   timetablingEligible: boolean;

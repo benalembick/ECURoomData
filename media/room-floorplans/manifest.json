@@ -1,0 +1,848 @@
+[
+  {
+    "room": "1S.710",
+    "name": "COWORKING SPACE",
+    "filename": "1S.710 - COWORKING SPACE.jpg",
+    "left": 4896,
+    "top": 503,
+    "width": 607,
+    "height": 443
+  },
+  {
+    "room": "1S.706",
+    "name": "PRINT PRODUCTION ROOM",
+    "filename": "1S.706 - PRINT PRODUCTION ROOM.jpg",
+    "left": 6860,
+    "top": 500,
+    "width": 1200,
+    "height": 540
+  },
+  {
+    "room": "1S.711B",
+    "name": "CHANGE RACK",
+    "filename": "1S.711B - CHANGE RACK.jpg",
+    "left": 5797,
+    "top": 514,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7RI07",
+    "name": "BUSPORT EXHAUST RISER",
+    "filename": "1S.7RI07 - BUSPORT EXHAUST RISER.jpg",
+    "left": 3856,
+    "top": 575,
+    "width": 555,
+    "height": 348
+  },
+  {
+    "room": "1S.711A",
+    "name": "EQUIPMENT",
+    "filename": "1S.711A - EQUIPMENT.jpg",
+    "left": 5390,
+    "top": 560,
+    "width": 482,
+    "height": 377
+  },
+  {
+    "room": "1S.711C",
+    "name": "RACK",
+    "filename": "1S.711C - RACK.jpg",
+    "left": 5830,
+    "top": 806,
+    "width": 168,
+    "height": 229
+  },
+  {
+    "room": "1S.7C13",
+    "name": "CIRCULATION",
+    "filename": "1S.7C13 - CIRCULATION.jpg",
+    "left": 5827,
+    "top": 888,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7C06",
+    "name": "SOCIAL BRIDGE LANEWAY",
+    "filename": "1S.7C06 - SOCIAL BRIDGE LANEWAY.jpg",
+    "left": 4266,
+    "top": 1083,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.711",
+    "name": "MOTION CAPTURE STUDIO & HAPTIC VR CREATION",
+    "filename": "1S.711 - MOTION CAPTURE STUDIO & HAPTIC VR CREATION.jpg",
+    "left": 4220,
+    "top": 760,
+    "width": 2030,
+    "height": 1290
+  },
+  {
+    "room": "1S.707",
+    "name": "SAH PROJECT GALLERY",
+    "filename": "1S.707 - SAH PROJECT GALLERY.jpg",
+    "left": 5750,
+    "top": 920,
+    "width": 2490,
+    "height": 1280
+  },
+  {
+    "room": "1S.7V00",
+    "name": "VOID",
+    "filename": "1S.7V00 - VOID.jpg",
+    "left": 4678,
+    "top": 1177,
+    "width": 242,
+    "height": 611
+  },
+  {
+    "room": "1S.7C07",
+    "name": "INFORMAL",
+    "filename": "1S.7C07 - INFORMAL.jpg",
+    "left": 4319,
+    "top": 1340,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7S10",
+    "name": "FH",
+    "filename": "1S.7S10 - FH.jpg",
+    "left": 6011,
+    "top": 1505,
+    "width": 220,
+    "height": 336
+  },
+  {
+    "room": "1S.722",
+    "name": "SMALL MEETING",
+    "filename": "1S.722 - SMALL MEETING.jpg",
+    "left": 2730,
+    "top": 1807,
+    "width": 320,
+    "height": 352
+  },
+  {
+    "room": "1S.721",
+    "name": "SMALL MEETING",
+    "filename": "1S.721 - SMALL MEETING.jpg",
+    "left": 3017,
+    "top": 1807,
+    "width": 250,
+    "height": 354
+  },
+  {
+    "room": "1S.7C02",
+    "name": "STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING STAFF-STUDENT INTERFACE",
+    "filename": "1S.7C02 - STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING STAFF-STUDENT INTERFACE.jpg",
+    "left": 2842,
+    "top": 1789,
+    "width": 873,
+    "height": 880
+  },
+  {
+    "room": "1S.720",
+    "name": "SMALL MEETING",
+    "filename": "1S.720 - SMALL MEETING.jpg",
+    "left": 3238,
+    "top": 1807,
+    "width": 251,
+    "height": 347
+  },
+  {
+    "room": "1S.7L11",
+    "name": "LIFT CAR [EL-11]",
+    "filename": "1S.7L11 - LIFT CAR [EL-11].jpg",
+    "left": 3744,
+    "top": 1922,
+    "width": 186,
+    "height": 128
+  },
+  {
+    "room": "1S.7L12",
+    "name": "LIFT CAR [EL-12]",
+    "filename": "1S.7L12 - LIFT CAR [EL-12].jpg",
+    "left": 3967,
+    "top": 1922,
+    "width": 185,
+    "height": 128
+  },
+  {
+    "room": "1S.7L13",
+    "name": "LIFT CAR [EL-13]",
+    "filename": "1S.7L13 - LIFT CAR [EL-13].jpg",
+    "left": 4189,
+    "top": 1922,
+    "width": 186,
+    "height": 128
+  },
+  {
+    "room": "1S.713",
+    "name": "PROJECT",
+    "filename": "1S.713 - PROJECT.jpg",
+    "left": 5266,
+    "top": 1813,
+    "width": 404,
+    "height": 271
+  },
+  {
+    "room": "1S.714",
+    "name": "PROJECT",
+    "filename": "1S.714 - PROJECT.jpg",
+    "left": 5639,
+    "top": 1813,
+    "width": 424,
+    "height": 271
+  },
+  {
+    "room": "1S.7C05",
+    "name": "CIRCULATION",
+    "filename": "1S.7C05 - CIRCULATION.jpg",
+    "left": 4409,
+    "top": 1926,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7C00",
+    "name": "CIRCULATION",
+    "filename": "1S.7C00 - CIRCULATION.jpg",
+    "left": 3792,
+    "top": 2037,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7C01",
+    "name": "STAFF-STUDENT INTERFACE",
+    "filename": "1S.7C01 - STAFF-STUDENT INTERFACE.jpg",
+    "left": 2639,
+    "top": 2070,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7S07",
+    "name": "DB",
+    "filename": "1S.7S07 - DB.jpg",
+    "left": 2561,
+    "top": 2294,
+    "width": 292,
+    "height": 299
+  },
+  {
+    "room": "1S.7S06",
+    "name": "COMMS",
+    "filename": "1S.7S06 - COMMS.jpg",
+    "left": 2820,
+    "top": 2294,
+    "width": 312,
+    "height": 299
+  },
+  {
+    "room": "1S.7RI05",
+    "name": "RISER",
+    "filename": "1S.7RI05 - RISER.jpg",
+    "left": 3114,
+    "top": 2327,
+    "width": 151,
+    "height": 145
+  },
+  {
+    "room": "1S.7RI04",
+    "name": "STAIR PRESS",
+    "filename": "1S.7RI04 - STAIR PRESS.jpg",
+    "left": 3229,
+    "top": 2370,
+    "width": 158,
+    "height": 103
+  },
+  {
+    "room": "1S.7L15",
+    "name": "CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -",
+    "filename": "1S.7L15 - CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -.jpg",
+    "left": 3790,
+    "top": 2295,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7A01",
+    "name": "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+    "filename": "1S.7A01 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg",
+    "left": 3675,
+    "top": 2557,
+    "width": 743,
+    "height": 502
+  },
+  {
+    "room": "1S.7L16",
+    "name": "LIFT CAR [EL-16]",
+    "filename": "1S.7L16 - LIFT CAR [EL-16].jpg",
+    "left": 4189,
+    "top": 2427,
+    "width": 176,
+    "height": 117
+  },
+  {
+    "room": "1S.7A05",
+    "name": "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+    "filename": "1S.7A05 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg",
+    "left": 3675,
+    "top": 2557,
+    "width": 743,
+    "height": 502
+  },
+  {
+    "room": "1S.715A",
+    "name": "CATERING PREP",
+    "filename": "1S.715A - CATERING PREP.jpg",
+    "left": 6309,
+    "top": 2304,
+    "width": 549,
+    "height": 321
+  },
+  {
+    "room": "1S.7C10",
+    "name": "COLLAB SOUTH LANEWAY",
+    "filename": "1S.7C10 - COLLAB SOUTH LANEWAY.jpg",
+    "left": 5697,
+    "top": 2353,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7RI01",
+    "name": "RISER",
+    "filename": "1S.7RI01 - RISER.jpg",
+    "left": 5375,
+    "top": 2311,
+    "width": 394,
+    "height": 461
+  },
+  {
+    "room": "1S.7B01",
+    "name": "STORE - GENERAL",
+    "filename": "1S.7B01 - STORE - GENERAL.jpg",
+    "left": 6823,
+    "top": 2304,
+    "width": 527,
+    "height": 319
+  },
+  {
+    "room": "1S.725",
+    "name": "STAFF COMMONS (KITCHEN + LOUNGE)",
+    "filename": "1S.725 - STAFF COMMONS (KITCHEN + LOUNGE).jpg",
+    "left": 1290,
+    "top": 2250,
+    "width": 1170,
+    "height": 1380
+  },
+  {
+    "room": "1S.7S03",
+    "name": "STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS",
+    "filename": "1S.7S03 - STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS.jpg",
+    "left": 2893,
+    "top": 2039,
+    "width": 826,
+    "height": 1109
+  },
+  {
+    "room": "1S.7RI06",
+    "name": "RISER",
+    "filename": "1S.7RI06 - RISER.jpg",
+    "left": 2570,
+    "top": 2563,
+    "width": 562,
+    "height": 386
+  },
+  {
+    "room": "1S.737",
+    "name": "EXAMINATION DISTRIBUTION",
+    "filename": "1S.737 - EXAMINATION DISTRIBUTION.jpg",
+    "left": 2111,
+    "top": 2696,
+    "width": 482,
+    "height": 422
+  },
+  {
+    "room": "1S.7C04",
+    "name": "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+    "filename": "1S.7C04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg",
+    "left": 3675,
+    "top": 2557,
+    "width": 743,
+    "height": 502
+  },
+  {
+    "room": "1S.7S02",
+    "name": "SERVICES SERVICES SERVICES TOILET - UAT",
+    "filename": "1S.7S02 - SERVICES SERVICES SERVICES TOILET - UAT.jpg",
+    "left": 3372,
+    "top": 2689,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7ST07",
+    "name": "STAIR 07",
+    "filename": "1S.7ST07 - STAIR 07.jpg",
+    "left": 3114,
+    "top": 2759,
+    "width": 392,
+    "height": 284
+  },
+  {
+    "room": "1S.7S01",
+    "name": "FHR RISER STAIR PRESS RISER SERVICES SERVICES",
+    "filename": "1S.7S01 - FHR RISER STAIR PRESS RISER SERVICES SERVICES.jpg",
+    "left": 3078,
+    "top": 2236,
+    "width": 641,
+    "height": 912
+  },
+  {
+    "room": "1S.7S08",
+    "name": "FHR STAFF GALLERY STORE BOOTH",
+    "filename": "1S.7S08 - FHR STAFF GALLERY STORE BOOTH.jpg",
+    "left": 2154,
+    "top": 3034,
+    "width": 1016,
+    "height": 398
+  },
+  {
+    "room": "1S.7A04",
+    "name": "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+    "filename": "1S.7A04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg",
+    "left": 3675,
+    "top": 2557,
+    "width": 743,
+    "height": 502
+  },
+  {
+    "room": "1S.731B",
+    "name": "FOCUS POD [FORMER 1S.731H]",
+    "filename": "1S.731B - FOCUS POD [FORMER 1S.731H].jpg",
+    "left": 3673,
+    "top": 3235,
+    "width": 183,
+    "height": 180
+  },
+  {
+    "room": "1S.732",
+    "name": "MEDIUM MEETING",
+    "filename": "1S.732 - MEDIUM MEETING.jpg",
+    "left": 3013,
+    "top": 3231,
+    "width": 386,
+    "height": 314
+  },
+  {
+    "room": "1S.731A",
+    "name": "BOOTH 1S.731I] FOCUS [FORMER",
+    "filename": "1S.731A - BOOTH 1S.731I] FOCUS [FORMER.jpg",
+    "left": 3369,
+    "top": 3225,
+    "width": 167,
+    "height": 318
+  },
+  {
+    "room": "1S.7B02",
+    "name": "STORE",
+    "filename": "1S.7B02 - STORE.jpg",
+    "left": 2876,
+    "top": 3151,
+    "width": 175,
+    "height": 207
+  },
+  {
+    "room": "1S.715",
+    "name": "FUNCTION ROOM",
+    "filename": "1S.715 - FUNCTION ROOM.jpg",
+    "left": 6220,
+    "top": 3020,
+    "width": 2220,
+    "height": 2150
+  },
+  {
+    "room": "1S.731C",
+    "name": "FOCUS POD [FORMER 1S.731G]",
+    "filename": "1S.731C - FOCUS POD [FORMER 1S.731G].jpg",
+    "left": 3680,
+    "top": 3383,
+    "width": 176,
+    "height": 169
+  },
+  {
+    "room": "1S.716",
+    "name": "SAL SPACE (48)",
+    "filename": "1S.716 - SAL SPACE (48).jpg",
+    "left": 5000,
+    "top": 2870,
+    "width": 1500,
+    "height": 1680
+  },
+  {
+    "room": "1S.730",
+    "name": "BOARDROOM",
+    "filename": "1S.730 - BOARDROOM.jpg",
+    "left": 3858,
+    "top": 3378,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.738",
+    "name": "STAFF COMMONS - LOUNGE",
+    "filename": "1S.738 - STAFF COMMONS - LOUNGE.jpg",
+    "left": 1340,
+    "top": 3150,
+    "width": 910,
+    "height": 1900
+  },
+  {
+    "room": "1S.738A",
+    "name": "FOCUS POD",
+    "filename": "1S.738A - FOCUS POD.jpg",
+    "left": 2030,
+    "top": 3543,
+    "width": 163,
+    "height": 123
+  },
+  {
+    "room": "1S.735A",
+    "name": "FOCUS POD",
+    "filename": "1S.735A - FOCUS POD.jpg",
+    "left": 2161,
+    "top": 3543,
+    "width": 165,
+    "height": 123
+  },
+  {
+    "room": "1S.7C08",
+    "name": "FOCUSED SOUTH LANEWAY",
+    "filename": "1S.7C08 - FOCUSED SOUTH LANEWAY.jpg",
+    "left": 4284,
+    "top": 2999,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.734A",
+    "name": "BOOTH 1S.734R] ACCESSIBLE FOCUS [FORMER",
+    "filename": "1S.734A - BOOTH 1S.734R] ACCESSIBLE FOCUS [FORMER.jpg",
+    "left": 2874,
+    "top": 3326,
+    "width": 168,
+    "height": 226
+  },
+  {
+    "room": "1S.736",
+    "name": "PARENTING",
+    "filename": "1S.736 - PARENTING.jpg",
+    "left": 2040,
+    "top": 3227,
+    "width": 279,
+    "height": 339
+  },
+  {
+    "room": "1S.734B",
+    "name": "BOOTH 1S.734Q] FOCUS [FORMER",
+    "filename": "1S.734B - BOOTH 1S.734Q] FOCUS [FORMER.jpg",
+    "left": 2746,
+    "top": 3225,
+    "width": 161,
+    "height": 327
+  },
+  {
+    "room": "1S.733",
+    "name": "SMALL MEETING",
+    "filename": "1S.733 - SMALL MEETING.jpg",
+    "left": 2501,
+    "top": 3226,
+    "width": 277,
+    "height": 318
+  },
+  {
+    "room": "1S.7C11",
+    "name": "CIRCULATION",
+    "filename": "1S.7C11 - CIRCULATION.jpg",
+    "left": 5699,
+    "top": 2679,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7ST32",
+    "name": "STAIR 32",
+    "filename": "1S.7ST32 - STAIR 32.jpg",
+    "left": 4652,
+    "top": 2710,
+    "width": 262,
+    "height": 228
+  },
+  {
+    "room": "1S.7C03",
+    "name": "STAFF GALLERY STORE BOOTH 1S.734Q]",
+    "filename": "1S.7C03 - STAFF GALLERY STORE BOOTH 1S.734Q].jpg",
+    "left": 2546,
+    "top": 3015,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7ST06",
+    "name": "STAIR 06",
+    "filename": "1S.7ST06 - STAIR 06.jpg",
+    "left": 4914,
+    "top": 2700,
+    "width": 393,
+    "height": 189
+  },
+  {
+    "room": "1S.7A02",
+    "name": "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+    "filename": "1S.7A02 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg",
+    "left": 3675,
+    "top": 2557,
+    "width": 743,
+    "height": 502
+  },
+  {
+    "room": "1S.7C03A",
+    "name": "KITCHENETTE & PRINT STATION",
+    "filename": "1S.7C03A - KITCHENETTE & PRINT STATION.jpg",
+    "left": 2559,
+    "top": 2917,
+    "width": 561,
+    "height": 207
+  },
+  {
+    "room": "1S.7A03",
+    "name": "CLEANERS",
+    "filename": "1S.7A03 - CLEANERS.jpg",
+    "left": 3997,
+    "top": 2704,
+    "width": 109,
+    "height": 207
+  },
+  {
+    "room": "1S.7S04",
+    "name": "SERVICES SERVICES",
+    "filename": "1S.7S04 - SERVICES SERVICES.jpg",
+    "left": 3372,
+    "top": 2472,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7L14",
+    "name": "LIFT CAR [EL-14]",
+    "filename": "1S.7L14 - LIFT CAR [EL-14].jpg",
+    "left": 3744,
+    "top": 2423,
+    "width": 186,
+    "height": 121
+  },
+  {
+    "room": "1S.7V02",
+    "name": "VOID",
+    "filename": "1S.7V02 - VOID.jpg",
+    "left": 7001,
+    "top": 1858,
+    "width": 311,
+    "height": 475
+  },
+  {
+    "room": "1S.7S05",
+    "name": "FHR",
+    "filename": "1S.7S05 - FHR.jpg",
+    "left": 3529,
+    "top": 2328,
+    "width": 107,
+    "height": 105
+  },
+  {
+    "room": "1S.7RI03",
+    "name": "RISER",
+    "filename": "1S.7RI03 - RISER.jpg",
+    "left": 3351,
+    "top": 2327,
+    "width": 155,
+    "height": 145
+  },
+  {
+    "room": "1S.7C09",
+    "name": "CIRCULATION",
+    "filename": "1S.7C09 - CIRCULATION.jpg",
+    "left": 5167,
+    "top": 2037,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.724",
+    "name": "RECORDING STUDIO",
+    "filename": "1S.724 - RECORDING STUDIO.jpg",
+    "left": 2155,
+    "top": 2417,
+    "width": 264,
+    "height": 263
+  },
+  {
+    "room": "1S.7C12",
+    "name": "COLLAB SOUTH LANEWAY",
+    "filename": "1S.7C12 - COLLAB SOUTH LANEWAY.jpg",
+    "left": 6266,
+    "top": 1911,
+    "width": 460,
+    "height": 340
+  },
+  {
+    "room": "1S.7RI02",
+    "name": "PRESS STAIR",
+    "filename": "1S.7RI02 - PRESS STAIR.jpg",
+    "left": 5288,
+    "top": 2327,
+    "width": 130,
+    "height": 357
+  },
+  {
+    "room": "1S.725B",
+    "name": "STAFF TERRACE",
+    "filename": "1S.725B - STAFF TERRACE.jpg",
+    "left": 1300,
+    "top": 1850,
+    "width": 1170,
+    "height": 630
+  },
+  {
+    "room": "1S.712",
+    "name": "PROJECT",
+    "filename": "1S.712 - PROJECT.jpg",
+    "left": 4927,
+    "top": 1813,
+    "width": 372,
+    "height": 271
+  },
+  {
+    "room": "1S.725A",
+    "name": "EXPERT LAB",
+    "filename": "1S.725A - EXPERT LAB.jpg",
+    "left": 2183,
+    "top": 1808,
+    "width": 339,
+    "height": 392
+  },
+  {
+    "room": "1S.723",
+    "name": "SMALL MEETING",
+    "filename": "1S.723 - SMALL MEETING.jpg",
+    "left": 2489,
+    "top": 1753,
+    "width": 273,
+    "height": 393
+  },
+  {
+    "room": "1S.731",
+    "name": "NEIGHBOURHOOD 1",
+    "filename": "1S.731 - NEIGHBOURHOOD 1.jpg",
+    "left": 3030,
+    "top": 3010,
+    "width": 1380,
+    "height": 1930
+  },
+  {
+    "room": "1S.717",
+    "name": "TEAL SPACE (48)",
+    "filename": "1S.717 - TEAL SPACE (48).jpg",
+    "left": 4240,
+    "top": 2960,
+    "width": 1390,
+    "height": 2020
+  },
+  {
+    "room": "1S.7V01",
+    "name": "VOID",
+    "filename": "1S.7V01 - VOID.jpg",
+    "left": 4401,
+    "top": 3462,
+    "width": 519,
+    "height": 275
+  },
+  {
+    "room": "1S.738B",
+    "name": "ACCESSIBLE FOCUS BOOTH",
+    "filename": "1S.738B - ACCESSIBLE FOCUS BOOTH.jpg",
+    "left": 2030,
+    "top": 3634,
+    "width": 288,
+    "height": 169
+  },
+  {
+    "room": "1S.735B",
+    "name": "ACCESSIBLE FOCUS BOOTH",
+    "filename": "1S.735B - ACCESSIBLE FOCUS BOOTH.jpg",
+    "left": 2038,
+    "top": 3771,
+    "width": 288,
+    "height": 167
+  },
+  {
+    "room": "1S.715B",
+    "name": "OUTDOOR TERRACE [FORMER 1S.715A]",
+    "filename": "1S.715B - OUTDOOR TERRACE [FORMER 1S.715A].jpg",
+    "left": 6395,
+    "top": 3632,
+    "width": 975,
+    "height": 415
+  },
+  {
+    "room": "1S.734",
+    "name": "NEIGHBOURHOOD 1",
+    "filename": "1S.734 - NEIGHBOURHOOD 1.jpg",
+    "left": 2430,
+    "top": 3240,
+    "width": 1120,
+    "height": 1940
+  },
+  {
+    "room": "1S.738C",
+    "name": "FOCUS POD",
+    "filename": "1S.738C - FOCUS POD.jpg",
+    "left": 2030,
+    "top": 3916,
+    "width": 163,
+    "height": 122
+  },
+  {
+    "room": "1S.735C",
+    "name": "FOCUS POD",
+    "filename": "1S.735C - FOCUS POD.jpg",
+    "left": 2161,
+    "top": 3916,
+    "width": 165,
+    "height": 122
+  },
+  {
+    "room": "1S.735D",
+    "name": "FOCUS BOOTH",
+    "filename": "1S.735D - FOCUS BOOTH.jpg",
+    "left": 2038,
+    "top": 4008,
+    "width": 288,
+    "height": 185
+  },
+  {
+    "room": "1S.735",
+    "name": "NEIGHBOURHOOD 1",
+    "filename": "1S.735 - NEIGHBOURHOOD 1.jpg",
+    "left": 1750,
+    "top": 3430,
+    "width": 900,
+    "height": 1830
+  }
+]

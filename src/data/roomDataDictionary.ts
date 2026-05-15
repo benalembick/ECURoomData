@@ -175,7 +175,6 @@ export function findDictionaryDefinitionForHeader(header: string) {
 
 export function findAttributeDefinitionForHeader(header: string, definitions: AttributeDefinition[] = roomDataDictionaryDefinitions) {
   const normalizedValues = normalizedHeaderCandidates(header);
-  const normalized = normalizedValues[0];
   const normalizedKey = makeAttributeKey(header);
   const parentheticalValues = Array.from(header.matchAll(/\(([^)]+)\)/g), (match) => match[1]);
   const normalizedParenthetical = parentheticalValues.map(normalizeDictionaryHeader);

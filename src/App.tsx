@@ -34,12 +34,12 @@ import {
   categories,
   changeRequests as initialChangeRequests,
   mappings,
-  patterns,
+  patterns as initialPatterns,
   rooms as initialRooms,
   systems,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, Building, Campus, ChangeRequest, ImportPreviewRow, Room, TaskStatus } from './types';
+import type { AttributeDefinition, Building, Campus, ChangeRequest, ImportPreviewRow, Room, RoomPattern, TaskStatus } from './types';
 import { cn, downloadCsv, titleCase } from './lib/utils';
 import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -168,6 +168,7 @@ export function App() {
   const [rooms, setRooms] = useState<Room[]>(initialRooms);
   const [campusesData, setCampusesData] = useState<Campus[]>(initialCampuses);
   const [buildingsData, setBuildingsData] = useState<Building[]>(initialBuildings);
+  const [roomPatterns, setRoomPatterns] = useState<RoomPattern[]>(initialPatterns);
   const [attributeDefinitions, setAttributeDefinitions] = useState<AttributeDefinition[]>(initialAttributeDefinitions);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(initialChangeRequests);
   const [selectedRoomId, setSelectedRoomId] = useState(initialRooms[0].id);
@@ -201,6 +202,7 @@ export function App() {
         setRooms(loaded.rooms);
         setCampusesData(loaded.campuses);
         setBuildingsData(loaded.buildings);
+        setRoomPatterns(loaded.patterns.length ? loaded.patterns : initialPatterns);
         setAttributeDefinitions(loaded.attributes.length ? loaded.attributes : initialAttributeDefinitions);
         setHasLoadedRoomData(true);
         setSelectedRoomId((currentRoomId) =>
@@ -346,9 +348,9 @@ export function App() {
           {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} roomDataLoading={roomDataLoading} />}
           {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} />}
           {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} />}
-          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} />}
+          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} />}
-          {view === 'patterns' && <Patterns />}
+          {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} />}
           {view === 'rules' && <Rules />}
           {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} />}
           {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} />}
@@ -963,7 +965,23 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={cn('badge', tone)}>{status}</span>;
 }
 
-function Admin({ rooms, setRooms, attributes, setAttributes, campuses, buildings }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void; campuses: Campus[]; buildings: Building[] }) {
+function Admin({
+  rooms,
+  setRooms,
+  attributes,
+  setAttributes,
+  campuses,
+  buildings,
+  patterns,
+}: {
+  rooms: Room[];
+  setRooms: (rooms: Room[]) => void;
+  attributes: AttributeDefinition[];
+  setAttributes: (attributes: AttributeDefinition[]) => void;
+  campuses: Campus[];
+  buildings: Building[];
+  patterns: RoomPattern[];
+}) {
   const [editingId, setEditingId] = useState(rooms[0].id);
   const room = rooms.find((item) => item.id === editingId) ?? rooms[0];
   const [draft, setDraft] = useState(() => roomDraftWithFinalName(room));
@@ -1795,32 +1813,450 @@ function mapRoomToCampusLocation(room: Room, campus: Campus, buildings: Building
   };
 }
 
-function Patterns() {
+const emptyPatternDraft: RoomPattern = {
+  id: '',
+  name: '',
+  category: categories[0]?.name ?? 'Teaching Space',
+  description: '',
+  ecuAvPatterns: [],
+  vizcomAvPatterns: [],
+  defaultBookingRules: [],
+  defaultO365Config: [],
+  timetablingEligible: false,
+  accessLogic: [],
+  requiredAttributes: [],
+  approvalRequirements: ['System Owner'],
+  downstreamSystems: ['O365'],
+};
+
+function Patterns({
+  rooms,
+  setRooms,
+  patterns,
+  setPatterns,
+}: {
+  rooms: Room[];
+  setRooms: (rooms: Room[]) => void;
+  patterns: RoomPattern[];
+  setPatterns: (patterns: RoomPattern[]) => void;
+}) {
+  const [selectedPatternId, setSelectedPatternId] = useState(patterns[0]?.id ?? '');
+  const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId) ?? patterns[0] ?? emptyPatternDraft;
+  const [draft, setDraft] = useState<RoomPattern>(selectedPattern);
+  const [roomSearch, setRoomSearch] = useState('');
+  const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    setDraft(selectedPattern);
+    setSelectedRoomIds(new Set());
+  }, [selectedPattern]);
+
+  useEffect(() => {
+    if (!patterns.some((pattern) => pattern.id === selectedPatternId)) {
+      setSelectedPatternId(patterns[0]?.id ?? '');
+    }
+  }, [patterns, selectedPatternId]);
+
+  const roomLinkRows = useMemo(() => {
+    const search = roomSearch.trim().toLowerCase();
+    return rooms
+      .map((room) => {
+        const avValues = getRoomAvPatternValues(room);
+        return {
+          room,
+          avValues,
+          isAliasMatch: roomMatchesPatternAliases(room, draft),
+          isCurrentPattern: room.pattern === draft.name,
+        };
+      })
+      .filter(({ room, avValues, isAliasMatch, isCurrentPattern }) => {
+        if (!search) return true;
+        return [room.roomCode, room.name, room.pattern, ...avValues]
+          .join(' ')
+          .toLowerCase()
+          .includes(search)
+          || isAliasMatch
+          || isCurrentPattern;
+      })
+      .sort((a, b) => Number(b.isAliasMatch) - Number(a.isAliasMatch) || a.room.roomCode.localeCompare(b.room.roomCode, undefined, { numeric: true }));
+  }, [draft, roomSearch, rooms]);
+
+  const aliasMatchIds = useMemo(
+    () => roomLinkRows.filter((row) => row.isAliasMatch).map((row) => row.room.id),
+    [roomLinkRows],
+  );
+  const ecuAvPatternOptions = useMemo(() => getUniqueRoomAvPatternValues(rooms, 'ecu'), [rooms]);
+  const vizcomAvPatternOptions = useMemo(() => getUniqueRoomAvPatternValues(rooms, 'vizcom'), [rooms]);
+  const roomsUsingPattern = rooms.filter((room) => room.pattern === draft.name).length;
+
+  const createPattern = () => {
+    const newPattern = {
+      ...emptyPatternDraft,
+      id: `pattern-${Date.now()}`,
+      name: 'New Room Pattern',
+      description: 'Describe when this governed pattern should be used.',
+    };
+    setPatterns([...patterns, newPattern]);
+    setSelectedPatternId(newPattern.id);
+  };
+
+  const savePattern = () => {
+    const cleanedDraft = cleanPatternDraft(draft);
+    if (!cleanedDraft.name.trim()) {
+      alert('Pattern name is required.');
+      return;
+    }
+
+    setPatterns(patterns.map((pattern) => (pattern.id === cleanedDraft.id ? cleanedDraft : pattern)));
+    setRooms(rooms.map((room) => (room.pattern === selectedPattern.name ? applyPatternToRoom(room, cleanedDraft) : room)));
+    setSelectedPatternId(cleanedDraft.id);
+  };
+
+  const deletePattern = () => {
+    if (roomsUsingPattern > 0) {
+      alert('Move rooms off this pattern before deleting it.');
+      return;
+    }
+    const nextPatterns = patterns.filter((pattern) => pattern.id !== draft.id);
+    setPatterns(nextPatterns);
+    setSelectedPatternId(nextPatterns[0]?.id ?? '');
+  };
+
+  const selectAliasMatches = () => {
+    setSelectedRoomIds(new Set(aliasMatchIds));
+  };
+
+  const toggleRoomSelection = (roomId: string, checked: boolean) => {
+    setSelectedRoomIds((current) => {
+      const next = new Set(current);
+      if (checked) next.add(roomId);
+      else next.delete(roomId);
+      return next;
+    });
+  };
+
+  const applyPatternToSelectedRooms = () => {
+    const selectedIds = selectedRoomIds;
+    setRooms(rooms.map((room) => (selectedIds.has(room.id) ? applyPatternToRoom(room, draft) : room)));
+    setSelectedRoomIds(new Set());
+  };
+
   return (
     <>
-      <PageHeader title="Room Patterns and Categories" description="Reusable governed patterns replace one-off configuration and define default booking, access, O365, approval, and downstream mapping behaviour." />
-      <div className="grid gap-4 xl:grid-cols-2">
-        {patterns.map((pattern) => (
-          <div key={pattern.id} className="panel rounded-lg p-4">
-            <div className="flex items-start justify-between gap-3">
-              <div>
+      <PageHeader
+        title="Room Patterns and Categories"
+        description="Manage reusable room patterns, link ECU and Vizcom AV pattern names, and batch assign matching rooms for initial link up."
+        action={<button className="btn-primary" onClick={createPattern}><Plus size={16} /> New pattern</button>}
+      />
+      <section className="grid gap-6 xl:grid-cols-[360px_1fr]">
+        <div className="panel rounded-lg">
+          <SectionTitle icon={Layers3} title="Pattern Library" />
+          <div className="max-h-[760px] overflow-auto p-2">
+            {patterns.map((pattern) => (
+              <button
+                key={pattern.id}
+                onClick={() => setSelectedPatternId(pattern.id)}
+                className={cn('mb-2 w-full rounded-md border p-3 text-left text-sm transition', pattern.id === draft.id ? 'border-ecu-teal bg-ecu-mint' : 'border-slate-200 bg-white hover:border-slate-300')}
+              >
                 <p className="label">{pattern.category}</p>
-                <h3 className="mt-1 text-lg font-bold text-slate-950">{pattern.name}</h3>
+                <p className="mt-1 font-bold text-slate-950">{pattern.name}</p>
+                <p className="mt-1 text-slate-600">{rooms.filter((room) => room.pattern === pattern.name).length} linked room(s)</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="panel rounded-lg p-4">
+            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <div>
+                <p className="label">{draft.category}</p>
+                <h3 className="mt-1 text-lg font-bold text-slate-950">{draft.name || 'Untitled pattern'}</h3>
               </div>
-              <StatusBadge status={pattern.timetablingEligible ? 'Timetabling eligible' : 'Not timetabled'} />
+              <div className="flex flex-wrap gap-2">
+                <StatusBadge status={draft.timetablingEligible ? 'Timetabling eligible' : 'Not timetabled'} />
+                <StatusBadge status={`${roomsUsingPattern} linked room${roomsUsingPattern === 1 ? '' : 's'}`} />
+              </div>
             </div>
-            <p className="mt-3 text-sm leading-6 text-slate-600">{pattern.description}</p>
+
+            <div className="mt-4 grid gap-4 md:grid-cols-2">
+              <TextInput label="Pattern name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
+              <FilterSelect label="Category" value={draft.category} setValue={(value) => setDraft({ ...draft, category: value })} options={categories.map((category) => category.name)} />
+            </div>
+            <div className="mt-4">
+              <Textarea label="Description" value={draft.description} onChange={(value) => setDraft({ ...draft, description: value })} />
+            </div>
             <div className="mt-4 grid gap-3 md:grid-cols-2">
-              <MiniList title="Booking rules" items={pattern.defaultBookingRules} />
-              <MiniList title="Access logic" items={pattern.accessLogic} />
-              <MiniList title="Required attributes" items={pattern.requiredAttributes} />
-              <MiniList title="Downstream systems" items={pattern.downstreamSystems} />
+              <AliasPicker
+                label="ECU AV Pattern aliases"
+                value={draft.ecuAvPatterns}
+                options={ecuAvPatternOptions}
+                onChange={(value) => setDraft({ ...draft, ecuAvPatterns: value })}
+              />
+              <AliasPicker
+                label="Vizcom AV Pattern aliases"
+                value={draft.vizcomAvPatterns}
+                options={vizcomAvPatternOptions}
+                onChange={(value) => setDraft({ ...draft, vizcomAvPatterns: value })}
+              />
+              <ListTextarea label="Booking rules" value={draft.defaultBookingRules} onChange={(value) => setDraft({ ...draft, defaultBookingRules: value })} />
+              <ListTextarea label="Access logic" value={draft.accessLogic} onChange={(value) => setDraft({ ...draft, accessLogic: value })} />
+              <ListTextarea label="Required attributes" value={draft.requiredAttributes} onChange={(value) => setDraft({ ...draft, requiredAttributes: value })} />
+              <ListTextarea label="Downstream systems" value={draft.downstreamSystems} onChange={(value) => setDraft({ ...draft, downstreamSystems: value })} />
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Toggle label="Timetabling eligible" checked={draft.timetablingEligible} onChange={(value) => setDraft({ ...draft, timetablingEligible: value })} />
+              <button className="btn-primary" onClick={savePattern}><CheckCircle2 size={16} /> Save pattern</button>
+              <button className="btn-secondary" onClick={deletePattern} disabled={!draft.id}><Trash2 size={16} /> Delete</button>
             </div>
           </div>
-        ))}
-      </div>
+
+          <div className="panel rounded-lg">
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+              <div>
+                <h3 className="font-bold text-slate-950">Initial Link Up</h3>
+                <p className="mt-1 text-sm text-slate-600">
+                  Match rooms by ECU AV Pattern or Vizcom AV Pattern aliases, then apply this governed pattern in bulk.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button className="btn-secondary" onClick={selectAliasMatches} disabled={aliasMatchIds.length === 0}>
+                  <ListChecks size={16} /> Select {aliasMatchIds.length} match{aliasMatchIds.length === 1 ? '' : 'es'}
+                </button>
+                <button className="btn-primary" onClick={applyPatternToSelectedRooms} disabled={selectedRoomIds.size === 0}>
+                  <RefreshCcw size={16} /> Apply to {selectedRoomIds.size} room{selectedRoomIds.size === 1 ? '' : 's'}
+                </button>
+              </div>
+            </div>
+            <div className="border-b border-slate-200 p-4">
+              <label className="block">
+                <span className="label">Find rooms</span>
+                <div className="relative mt-1">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input
+                    className="input pl-9"
+                    value={roomSearch}
+                    onChange={(event) => setRoomSearch(event.target.value)}
+                    placeholder="Room code, name, current pattern, or AV pattern"
+                  />
+                </div>
+              </label>
+            </div>
+            <div className="max-h-[520px] overflow-auto">
+              <table className="w-full min-w-[900px] text-left text-sm">
+                <thead className="sticky top-0 bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="px-4 py-3">Select</th>
+                    <th className="px-4 py-3">Room</th>
+                    <th className="px-4 py-3">Current pattern</th>
+                    <th className="px-4 py-3">AV pattern values</th>
+                    <th className="px-4 py-3">Match</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-200">
+                  {roomLinkRows.map(({ room, avValues, isAliasMatch, isCurrentPattern }) => (
+                    <tr key={room.id} className={isAliasMatch ? 'bg-emerald-50/60' : undefined}>
+                      <td className="px-4 py-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedRoomIds.has(room.id)}
+                          onChange={(event) => toggleRoomSelection(room.id, event.target.checked)}
+                        />
+                      </td>
+                      <td className="px-4 py-3">
+                        <p className="font-semibold text-slate-900">{room.roomCode}</p>
+                        <p className="text-slate-600">{getRoomFinalName(room) || room.name}</p>
+                      </td>
+                      <td className="px-4 py-3">{room.pattern}</td>
+                      <td className="px-4 py-3 text-slate-600">{avValues.join(', ') || 'No AV pattern value'}</td>
+                      <td className="px-4 py-3">
+                        {isAliasMatch ? <StatusBadge status="Alias match" /> : isCurrentPattern ? <StatusBadge status="Already linked" /> : <StatusBadge status="Manual" />}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
     </>
   );
+}
+
+function ListTextarea({ label, value, onChange }: { label: string; value: string[]; onChange: (value: string[]) => void }) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <textarea
+        className="input mt-1 min-h-28"
+        value={value.join('\n')}
+        onChange={(event) => onChange(splitListInput(event.target.value))}
+      />
+      <p className="mt-1 text-xs text-slate-500">One value per line, or separate values with commas.</p>
+    </div>
+  );
+}
+
+function AliasPicker({
+  label,
+  value,
+  options,
+  onChange,
+}: {
+  label: string;
+  value: string[];
+  options: string[];
+  onChange: (value: string[]) => void;
+}) {
+  const selectedValues = uniqueStrings(value);
+  const selectedKeys = new Set(selectedValues.map(normalizePatternValue));
+
+  const toggleAlias = (alias: string) => {
+    const aliasKey = normalizePatternValue(alias);
+    if (selectedKeys.has(aliasKey)) {
+      onChange(selectedValues.filter((item) => normalizePatternValue(item) !== aliasKey));
+      return;
+    }
+
+    onChange(uniqueStrings([...selectedValues, alias]));
+  };
+
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <textarea
+        className="input mt-1 min-h-24"
+        value={selectedValues.join('\n')}
+        onChange={(event) => onChange(splitListInput(event.target.value))}
+      />
+      <div className="mt-3 rounded-md border border-slate-200 bg-slate-50 p-3">
+        <p className="label">Current room data values</p>
+        <div className="mt-2 flex max-h-32 flex-wrap gap-2 overflow-auto">
+          {options.length ? options.map((option) => {
+            const isSelected = selectedKeys.has(normalizePatternValue(option));
+            return (
+            <button
+              key={option}
+              className={cn(
+                'badge hover:border-ecu-teal hover:bg-ecu-mint',
+                isSelected ? 'border-ecu-teal bg-ecu-mint text-ecu-black' : 'border-slate-200 bg-white text-slate-700',
+              )}
+              onClick={() => toggleAlias(option)}
+              type="button"
+            >
+              {isSelected ? <CheckCircle2 size={13} /> : <Plus size={13} />} {option}
+            </button>
+          )}) : <p className="text-sm text-slate-500">No values found in current room data.</p>}
+        </div>
+      </div>
+      {selectedValues.length > 0 && (
+        <div className="mt-3 flex flex-wrap gap-2">
+          {selectedValues.map((alias) => (
+            <button
+              key={alias}
+              className="badge border-ecu-teal bg-ecu-mint text-ecu-black hover:border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={() => toggleAlias(alias)}
+              type="button"
+            >
+              <Trash2 size={13} /> {alias}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function splitListInput(value: string) {
+  return value
+    .split(/[\n,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function cleanPatternDraft(pattern: RoomPattern): RoomPattern {
+  return {
+    ...pattern,
+    name: pattern.name.trim(),
+    category: pattern.category.trim(),
+    description: pattern.description.trim(),
+    ecuAvPatterns: uniqueStrings(pattern.ecuAvPatterns),
+    vizcomAvPatterns: uniqueStrings(pattern.vizcomAvPatterns),
+    defaultBookingRules: uniqueStrings(pattern.defaultBookingRules),
+    defaultO365Config: uniqueStrings(pattern.defaultO365Config),
+    accessLogic: uniqueStrings(pattern.accessLogic),
+    requiredAttributes: uniqueStrings(pattern.requiredAttributes),
+    downstreamSystems: uniqueStrings(pattern.downstreamSystems),
+  };
+}
+
+function uniqueStrings(values: string[]) {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
+}
+
+function applyPatternToRoom(room: Room, pattern: RoomPattern): Room {
+  const category = categories.find((item) => item.name === pattern.category);
+  return {
+    ...room,
+    pattern: pattern.name,
+    category: pattern.category,
+    type: pattern.category,
+    isTeaching: category?.isTeaching ?? room.isTeaching,
+    isBookable: category?.isBookable ?? room.isBookable,
+    isSpecialist: category?.isSpecialist ?? room.isSpecialist,
+    downstreamSystems: pattern.downstreamSystems.length ? pattern.downstreamSystems : room.downstreamSystems,
+    bookingNotes: room.bookingNotes || pattern.defaultBookingRules.join('; '),
+    qualityFlags: [...new Set([...room.qualityFlags, 'Room pattern batch linked for review'])],
+  };
+}
+
+function roomMatchesPatternAliases(room: Room, pattern: RoomPattern) {
+  const roomValues = getRoomAvPatternValues(room).map(normalizePatternValue);
+  const aliases = [...pattern.ecuAvPatterns, ...pattern.vizcomAvPatterns].map(normalizePatternValue);
+  return roomValues.some((value) => aliases.includes(value));
+}
+
+function getRoomAvPatternValues(room: Room) {
+  return getRoomAvPatternValuesForSource(room, 'all');
+}
+
+function getRoomAvPatternValuesForSource(room: Room, source: 'ecu' | 'vizcom' | 'all') {
+  const patternKeyCandidates = new Set([
+    'ecu_av_pattern',
+    'vizcom_pattern',
+    'vizcom_av_pattern',
+  ]);
+
+  return Object.entries(room.attributes)
+    .filter(([key]) => {
+      const normalizedKey = makeAttributeKey(key);
+      const isEcuKey = normalizedKey.includes('ecu');
+      const isVizcomKey = normalizedKey.includes('vizcom');
+      if (source === 'ecu' && !isEcuKey) return false;
+      if (source === 'vizcom' && !isVizcomKey) return false;
+      return patternKeyCandidates.has(normalizedKey)
+        || (normalizedKey.includes('pattern') && (normalizedKey.includes('ecu') || normalizedKey.includes('vizcom')));
+    })
+    .flatMap(([, value]) => Array.isArray(value) ? value.flatMap((item) => splitAliasValues(String(item))) : splitAliasValues(String(value)))
+    .map((value) => value.trim())
+    .filter(Boolean);
+}
+
+function getUniqueRoomAvPatternValues(rooms: Room[], source: 'ecu' | 'vizcom') {
+  return uniqueStrings(rooms.flatMap((room) => getRoomAvPatternValuesForSource(room, source)))
+    .sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+}
+
+function splitAliasValues(value: string) {
+  return value
+    .split(/[\n;,]/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function normalizePatternValue(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, '');
 }
 
 function MiniList({ title, items }: { title: string; items: string[] }) {
