@@ -9,6 +9,7 @@ import type {
   SystemMapping,
   TransformationRule,
 } from '../types';
+import { roomDataDictionaryDefinitions } from './roomDataDictionary';
 
 export const campuses: Campus[] = [
   { code: 'JO', name: 'Joondalup Campus' },
@@ -91,7 +92,7 @@ export const categories: RoomCategory[] = [
   },
 ];
 
-export const attributeDefinitions: AttributeDefinition[] = [
+const legacyAttributeDefinitions: AttributeDefinition[] = [
   { key: 'teams_enabled', label: 'Teams enabled', type: 'boolean', group: 'Booking and AV', required: false, visible: true, downstreamSystems: ['O365', 'Appspace'] },
   { key: 'lecture_capture', label: 'Lecture capture', type: 'boolean', group: 'Teaching', required: false, visible: true, downstreamSystems: ['Timetabling', 'Appspace'] },
   { key: 'projector', label: 'Projector', type: 'boolean', group: 'AV', required: false, visible: true, downstreamSystems: ['Timetabling'] },
@@ -99,6 +100,11 @@ export const attributeDefinitions: AttributeDefinition[] = [
   { key: 'external_event_bookable', label: 'External event bookable', type: 'boolean', group: 'Booking', required: false, visible: true, downstreamSystems: ['Momentus'] },
   { key: 'specialist_equipment', label: 'Specialist equipment', type: 'multi-select', group: 'Equipment', required: false, visible: true, downstreamSystems: ['Timetabling', 'Maintenance'], options: ['Audio console', 'Broadcast camera', 'Practice piano', '3D printer'] },
   { key: 'student_access_group', label: 'Student access group', type: 'text', group: 'Security', required: false, visible: true, downstreamSystems: ['Security/access'] },
+];
+
+export const attributeDefinitions: AttributeDefinition[] = [
+  ...roomDataDictionaryDefinitions,
+  ...legacyAttributeDefinitions.filter((legacy) => !roomDataDictionaryDefinitions.some((definition) => definition.key === legacy.key)),
 ];
 
 export const patterns: RoomPattern[] = [

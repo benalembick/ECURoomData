@@ -28,6 +28,7 @@ export type TaskStatus = 'Not Started' | 'In Progress' | 'Blocked' | 'Completed'
 export interface Campus {
   code: string;
   name: string;
+  address?: string;
 }
 
 export interface Building {
@@ -64,6 +65,8 @@ export interface RoomPattern {
 export interface AttributeDefinition {
   key: string;
   label: string;
+  description?: string;
+  sourceField?: string;
   type: AttributeType;
   group: string;
   required: boolean;

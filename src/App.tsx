@@ -1,4 +1,4 @@
-import { ChangeEvent, useMemo, useState } from 'react';
+import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { z } from 'zod';
 import {
@@ -18,17 +18,19 @@ import {
   KeyRound,
   Layers3,
   ListChecks,
+  Pencil,
   Plus,
   RefreshCcw,
   Search,
   Settings2,
   ShieldCheck,
+  Trash2,
   Upload,
 } from 'lucide-react';
 import {
   attributeDefinitions as initialAttributeDefinitions,
-  buildings,
-  campuses,
+  buildings as initialBuildings,
+  campuses as initialCampuses,
   categories,
   changeRequests as initialChangeRequests,
   mappings,
@@ -37,15 +39,28 @@ import {
   systems,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, ChangeRequest, ImportPreviewRow, Room, TaskStatus } from './types';
+import type { AttributeDefinition, Building, Campus, ChangeRequest, ImportPreviewRow, Room, TaskStatus } from './types';
 import { cn, downloadCsv, titleCase } from './lib/utils';
-import { isSupabaseConfigured } from './lib/supabase';
+import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
+import { isSupabaseConfigured, supabase } from './lib/supabase';
+import { persistImportToSupabase, type PersistImportResult } from './services/importPersistence';
+import { persistBuildingDetails, persistBuildingRemoval, persistCampusDetails, persistCampusMapping, persistCampusRemoval, type CampusMappingProgress } from './services/campusPersistence';
+import { loadRoomDataFromSupabase, type RoomDataLoadProgress } from './services/roomData';
+import {
+  coreRoomFieldOptions,
+  compareRoomDataDictionaryGroups,
+  findAttributeDefinitionForHeader,
+  makeAttributeKey,
+  roomDataDictionaryByKey,
+  roomDataDictionaryDefinitions,
+} from './data/roomDataDictionary';
 
 type View =
   | 'dashboard'
   | 'rooms'
   | 'room-detail'
   | 'admin'
+  | 'locations'
   | 'patterns'
   | 'rules'
   | 'governance'
@@ -67,6 +82,7 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Home },
   { id: 'rooms', label: 'Room Search', icon: Search },
   { id: 'admin', label: 'Room Admin', icon: Settings2 },
+  { id: 'locations', label: 'Campuses', icon: Building2 },
   { id: 'patterns', label: 'Patterns', icon: Layers3 },
   { id: 'rules', label: 'Rules', icon: GitBranch },
   { id: 'governance', label: 'Governance', icon: ClipboardCheck },
@@ -74,23 +90,11 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
 ];
 
 const ecuLogoUrl = 'https://www.ecu.edu.au/__data/assets/image/0015/1100571/1920w.png';
-
-const fieldOptions = [
-  'ignore',
-  'roomCode',
-  'name',
-  'campus',
-  'building',
-  'floor',
-  'capacity',
-  'owner',
-  'pattern',
-  'bookingStatus',
-  'student_bookable',
-  'teams_enabled',
-  'lecture_capture',
-  'create_dynamic_attribute',
-];
+const customImportFieldGroup = 'Custom fields';
+const finalRoomNameAttributeKey = 'final_room_name';
+const roomCapacityAttributeKeys = ['capacity_afm_rm_capacity', 'capacity'];
+const roomCapacityAttributeLabels = ['Capacity (Afm.rm.capacity)', 'CAPACITY'];
+const roomSearchRenderLimit = 250;
 
 type ImportedRoomFields = Partial<
   Pick<Room, 'roomCode' | 'name' | 'campus' | 'building' | 'floor' | 'capacity' | 'owner' | 'pattern' | 'bookingStatus'>
@@ -98,13 +102,165 @@ type ImportedRoomFields = Partial<
   attributes?: Record<string, string | boolean | number | string[]>;
 };
 
+function getRoomFinalName(room: Room) {
+  const attributeValue = room.attributes[finalRoomNameAttributeKey];
+  const dictionaryName = typeof attributeValue === 'string' ? attributeValue.trim() : '';
+  const coreName = room.name.trim();
+  if (dictionaryName && dictionaryName !== room.roomCode) return dictionaryName;
+  if (coreName && coreName !== room.roomCode) return coreName;
+  return '';
+}
+
+function roomDisplayName(room: Room) {
+  const finalName = getRoomFinalName(room);
+  return finalName ? `${room.roomCode} - ${finalName}` : room.roomCode;
+}
+
+function roomDraftWithFinalName(room: Room): Room {
+  const finalName = getRoomFinalName(room);
+  return finalName ? { ...room, name: finalName } : room;
+}
+
+function getRoomCapacityValue(room: Room, attributes: AttributeDefinition[] = []) {
+  const attributeEntry = Object.entries(room.attributes).find(([key]) => roomCapacityAttributeKeys.includes(key))
+    ?? Object.entries(room.attributes).find(([key]) => {
+      const definition = attributes.find((attribute) => attribute.key === key) ?? roomDataDictionaryByKey.get(key);
+      return definition ? roomCapacityAttributeLabels.includes(definition.label) : false;
+    });
+
+  return attributeEntry?.[1] ?? room.capacity;
+}
+
+function getRoomCapacityNumber(room: Room, attributes: AttributeDefinition[] = []) {
+  const value = getRoomCapacityValue(room, attributes);
+  const parsed = Array.isArray(value) ? Number(value[0]) : Number(value);
+  return Number.isFinite(parsed) ? parsed : room.capacity;
+}
+
+function getRoomCapacityDisplay(room: Room, attributes: AttributeDefinition[] = []) {
+  return formatAttributeValue(getRoomCapacityValue(room, attributes));
+}
+
+function floorGroupLabel(room: Room) {
+  return room.floor?.trim() || 'Unmapped Floor';
+}
+
+function floorDisplayName(floor: string) {
+  const normalized = floor.trim().toLowerCase();
+  if (['b', 'basement', 'level b', 'level basement'].includes(normalized)) return 'Level Basement';
+  if (['g', 'ground', 'level g', 'level ground'].includes(normalized)) return 'Level Ground';
+  if (['m', 'mezzanine', 'level m', 'level mezzanine'].includes(normalized)) return 'Level Mezzanine';
+  return floor;
+}
+
+function floorSortValue(floor: string) {
+  const normalized = floorDisplayName(floor).toLowerCase();
+  if (normalized === 'level basement') return -30;
+  if (normalized === 'level ground') return -20;
+  if (normalized === 'level mezzanine') return -10;
+  const levelNumber = normalized.match(/^level\s+(\d+)$/)?.[1];
+  if (levelNumber) return Number(levelNumber);
+  return 1000;
+}
+
 export function App() {
   const [view, setView] = useState<View>('dashboard');
   const [rooms, setRooms] = useState<Room[]>(initialRooms);
+  const [campusesData, setCampusesData] = useState<Campus[]>(initialCampuses);
+  const [buildingsData, setBuildingsData] = useState<Building[]>(initialBuildings);
   const [attributeDefinitions, setAttributeDefinitions] = useState<AttributeDefinition[]>(initialAttributeDefinitions);
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(initialChangeRequests);
   const [selectedRoomId, setSelectedRoomId] = useState(initialRooms[0].id);
+  const [authEmail, setAuthEmail] = useState('');
+  const [authPassword, setAuthPassword] = useState('');
+  const [authUserEmail, setAuthUserEmail] = useState('');
+  const [authMessage, setAuthMessage] = useState('');
+  const [authLoading, setAuthLoading] = useState(false);
+  const [dataMessage, setDataMessage] = useState('');
+  const [dataLoading, setDataLoading] = useState(isSupabaseConfigured);
+  const [dataLoadProgress, setDataLoadProgress] = useState<RoomDataLoadProgress | null>(
+    isSupabaseConfigured
+      ? { percent: 0, completedSteps: 0, totalSteps: 6, message: 'Waiting for Supabase session' }
+      : null,
+  );
+  const [hasLoadedRoomData, setHasLoadedRoomData] = useState(false);
+  const roomDataLoadRef = useRef<Promise<void> | null>(null);
+  const roomDataLoading = isSupabaseConfigured && dataLoading && !hasLoadedRoomData;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0];
+
+  const refreshRoomData = useCallback(async () => {
+    if (!supabase) return;
+    if (roomDataLoadRef.current) return roomDataLoadRef.current;
+
+    setDataLoading(true);
+    setDataLoadProgress({ percent: 0, completedSteps: 0, totalSteps: 6, message: 'Connecting to Supabase' });
+    setDataMessage('');
+    const loadPromise = Promise.resolve().then(async () => {
+      const loaded = await loadRoomDataFromSupabase(setDataLoadProgress);
+      if (loaded) {
+        setRooms(loaded.rooms);
+        setCampusesData(loaded.campuses);
+        setBuildingsData(loaded.buildings);
+        setAttributeDefinitions(loaded.attributes.length ? loaded.attributes : initialAttributeDefinitions);
+        setHasLoadedRoomData(true);
+        setSelectedRoomId((currentRoomId) =>
+          loaded.rooms.length && !loaded.rooms.some((room) => room.id === currentRoomId) ? loaded.rooms[0].id : currentRoomId,
+        );
+        setDataMessage(`Loaded ${loaded.rooms.length} room(s) from Supabase.`);
+      }
+    });
+
+    roomDataLoadRef.current = loadPromise;
+    try {
+      await loadPromise;
+    } catch (error) {
+      setDataMessage(error instanceof Error ? error.message : 'Could not load room data from Supabase.');
+    } finally {
+      if (roomDataLoadRef.current === loadPromise) roomDataLoadRef.current = null;
+      setDataLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!supabase) return;
+
+    supabase.auth.getUser().then(({ data }) => {
+      setAuthUserEmail(data.user?.email ?? '');
+      if (data.user) void refreshRoomData();
+      if (!data.user) {
+        setDataLoading(false);
+        setDataLoadProgress(null);
+      }
+    });
+
+    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
+      setAuthUserEmail(session?.user.email ?? '');
+      if (session?.user.email) setAuthMessage('');
+      if (session?.user.email) void refreshRoomData();
+    });
+
+    return () => listener.subscription.unsubscribe();
+  }, [refreshRoomData]);
+
+  const signIn = async () => {
+    if (!supabase) return;
+    setAuthLoading(true);
+    setAuthMessage('');
+    const { error } = await supabase.auth.signInWithPassword({
+      email: authEmail,
+      password: authPassword,
+    });
+    setAuthLoading(false);
+    if (error) setAuthMessage(error.message);
+  };
+
+  const signOut = async () => {
+    if (!supabase) return;
+    await supabase.auth.signOut();
+    setAuthUserEmail('');
+    setAuthPassword('');
+    setAuthMessage('Signed out.');
+  };
 
   const openRoom = (roomId: string) => {
     setSelectedRoomId(roomId);
@@ -130,13 +286,33 @@ export function App() {
               <span className={cn('badge', isSupabaseConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700')}>
                 {isSupabaseConfigured ? 'Supabase connected' : 'Demo data mode'}
               </span>
-              <span className="badge border-slate-200 bg-slate-50 text-slate-700">
-                <ShieldCheck size={14} /> Admin
-              </span>
+              <SupabaseAuthControls
+                email={authEmail}
+                password={authPassword}
+                userEmail={authUserEmail}
+                message={authMessage}
+                loading={authLoading}
+                setEmail={setAuthEmail}
+                setPassword={setAuthPassword}
+                signIn={signIn}
+                signOut={signOut}
+                refreshRoomData={refreshRoomData}
+                dataLoading={dataLoading}
+              />
             </div>
           </div>
         </div>
       </header>
+
+      {dataMessage && (
+        <div className={cn('border-b px-4 py-2 text-sm lg:px-8', dataMessage.startsWith('Loaded') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-red-200 bg-red-50 text-red-700')}>
+          {dataMessage}
+        </div>
+      )}
+
+      {dataLoading && dataLoadProgress && (
+        <DataLoadProgressBanner progress={dataLoadProgress} />
+      )}
 
       <div className="grid min-h-[calc(100vh-139px)] grid-cols-1 lg:grid-cols-[248px_1fr]">
         <aside className="border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
@@ -167,14 +343,15 @@ export function App() {
         </aside>
 
         <main className="p-4 sm:p-6 lg:p-8">
-          {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} />}
-          {view === 'rooms' && <RoomSearch rooms={rooms} openRoom={openRoom} />}
-          {view === 'room-detail' && <RoomDetail room={selectedRoom} />}
-          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} />}
+          {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} roomDataLoading={roomDataLoading} />}
+          {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} />}
+          {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} />}
+          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} />}
+          {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} />}
           {view === 'patterns' && <Patterns />}
           {view === 'rules' && <Rules />}
           {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} />}
-          {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} />}
+          {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} />}
         </main>
       </div>
     </div>
@@ -193,7 +370,88 @@ function PageHeader({ title, description, action }: { title: string; description
   );
 }
 
-function Dashboard({ rooms, changeRequests, openRoom }: { rooms: Room[]; changeRequests: ChangeRequest[]; openRoom: (id: string) => void }) {
+function SupabaseAuthControls({
+  email,
+  password,
+  userEmail,
+  message,
+  loading,
+  setEmail,
+  setPassword,
+  signIn,
+  signOut,
+  refreshRoomData,
+  dataLoading,
+}: {
+  email: string;
+  password: string;
+  userEmail: string;
+  message: string;
+  loading: boolean;
+  setEmail: (value: string) => void;
+  setPassword: (value: string) => void;
+  signIn: () => void;
+  signOut: () => void;
+  refreshRoomData: () => void;
+  dataLoading: boolean;
+}) {
+  if (!isSupabaseConfigured) {
+    return (
+      <span className="badge border-slate-200 bg-slate-50 text-slate-700">
+        <ShieldCheck size={14} /> Demo
+      </span>
+    );
+  }
+
+  if (userEmail) {
+    return (
+      <div className="flex items-center gap-2">
+        <span className="badge border-emerald-200 bg-emerald-50 text-emerald-700">
+          <ShieldCheck size={14} /> {userEmail}
+        </span>
+        <button className="btn-secondary py-1 text-xs" disabled={dataLoading} onClick={refreshRoomData}>
+          <RefreshCcw size={14} /> {dataLoading ? 'Loading...' : 'Reload data'}
+        </button>
+        <button className="btn-secondary py-1 text-xs" onClick={signOut}>Sign out</button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex max-w-[520px] flex-wrap items-center justify-end gap-2">
+      <input
+        className="input h-9 w-44"
+        type="email"
+        placeholder="email"
+        value={email}
+        onChange={(event) => setEmail(event.target.value)}
+      />
+      <input
+        className="input h-9 w-36"
+        type="password"
+        placeholder="password"
+        value={password}
+        onChange={(event) => setPassword(event.target.value)}
+      />
+      <button className="btn-primary h-9 px-3 py-1 text-xs" disabled={loading || !email || !password} onClick={signIn}>
+        {loading ? 'Signing in...' : 'Sign in'}
+      </button>
+      {message && <p className="w-full text-right text-xs text-red-600">{message}</p>}
+    </div>
+  );
+}
+
+function Dashboard({
+  rooms,
+  changeRequests,
+  openRoom,
+  roomDataLoading,
+}: {
+  rooms: Room[];
+  changeRequests: ChangeRequest[];
+  openRoom: (id: string) => void;
+  roomDataLoading: boolean;
+}) {
   const pendingApprovals = changeRequests.filter((request) => request.status === 'Under Review' || request.status === 'Awaiting Information').length;
   const implementationTasks = changeRequests.flatMap((request) => request.tasks).filter((task) => task.status !== 'Completed' && task.status !== 'Verified');
   const highRisk = changeRequests.filter((request) => request.risk === 'high').length;
@@ -206,36 +464,34 @@ function Dashboard({ rooms, changeRequests, openRoom }: { rooms: Room[]; changeR
         description="A central view of room data quality, booking posture, workflow risk, and downstream system impact."
       />
       <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Building2} label="Enterprise room assets" value={rooms.length} detail={`${rooms.filter((room) => room.isBookable).length} bookable`} />
+        <MetricCard
+          icon={Building2}
+          label="Enterprise room assets"
+          value={rooms.length}
+          detail={`${rooms.filter((room) => room.isBookable).length} bookable`}
+          loading={roomDataLoading}
+          loadingLabel="Loading room data"
+        />
         <MetricCard icon={ClipboardCheck} label="Pending approvals" value={pendingApprovals} detail={`${highRisk} high-risk changes`} />
         <MetricCard icon={ListChecks} label="Open implementation tasks" value={implementationTasks.length} detail={`${implementationTasks.filter((task) => task.status === 'Blocked').length} blocked`} />
-        <MetricCard icon={GitBranch} label="Connected systems" value={connectedSystems.size} detail="O365, Archibus, timetable and more" />
+        <MetricCard
+          icon={GitBranch}
+          label="Connected systems"
+          value={connectedSystems.size}
+          detail="O365, Archibus, timetable and more"
+          loading={roomDataLoading}
+          loadingLabel="Loading system data"
+        />
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-[1.25fr_0.75fr]">
-        <div className="panel rounded-lg">
-          <div className="border-b border-slate-200 p-4">
-            <h3 className="font-bold text-slate-950">Rooms Needing Attention</h3>
-          </div>
-          <div className="divide-y divide-slate-200">
-            {rooms.filter((room) => room.qualityFlags.length).map((room) => (
-              <button key={room.id} onClick={() => openRoom(room.id)} className="flex w-full items-center justify-between gap-4 p-4 text-left hover:bg-slate-50">
-                <div>
-                  <p className="font-semibold text-slate-950">{room.roomCode} · {room.name}</p>
-                  <p className="mt-1 text-sm text-slate-600">{room.qualityFlags.join(', ')}</p>
-                </div>
-                <ChevronRight className="text-slate-400" size={18} />
-              </button>
-            ))}
-          </div>
-        </div>
-
+        <ChangeRequestList requests={changeRequests} limit={5} />
         <div className="panel rounded-lg">
           <div className="border-b border-slate-200 p-4">
             <h3 className="font-bold text-slate-950">Impacted Systems Summary</h3>
           </div>
           <div className="space-y-3 p-4">
-            {systems.map((system) => {
+            {roomDataLoading ? <LoadingPanelMessage label="Loading impacted systems" /> : systems.map((system) => {
               const count = rooms.filter((room) => room.downstreamSystems.includes(system)).length;
               return (
                 <div key={system}>
@@ -254,7 +510,7 @@ function Dashboard({ rooms, changeRequests, openRoom }: { rooms: Room[]; changeR
       </section>
 
       <section className="mt-6 grid gap-6 xl:grid-cols-2">
-        <ChangeRequestList requests={changeRequests} compact />
+        <RoomsNeedingAttention rooms={rooms} openRoom={openRoom} loading={roomDataLoading} limit={5} />
         <div className="panel rounded-lg p-4">
           <h3 className="font-bold text-slate-950">Recently Completed Controls</h3>
           <div className="mt-4 space-y-3">
@@ -271,42 +527,141 @@ function Dashboard({ rooms, changeRequests, openRoom }: { rooms: Room[]; changeR
   );
 }
 
-function MetricCard({ icon: Icon, label, value, detail }: { icon: typeof Home; label: string; value: string | number; detail: string }) {
+function MetricCard({
+  icon: Icon,
+  label,
+  value,
+  detail,
+  loading = false,
+  loadingLabel = 'Loading',
+}: {
+  icon: typeof Home;
+  label: string;
+  value: string | number;
+  detail: string;
+  loading?: boolean;
+  loadingLabel?: string;
+}) {
   return (
     <div className="panel rounded-lg p-4">
       <div className="flex items-start justify-between">
         <div>
           <p className="label">{label}</p>
-          <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
+          {loading ? (
+            <div className="mt-3 flex h-9 items-center gap-3" role="status" aria-live="polite">
+              <span className="loading-spinner" aria-hidden="true" />
+              <span className="text-sm font-semibold text-slate-600">{loadingLabel}</span>
+            </div>
+          ) : (
+            <p className="mt-2 text-3xl font-bold text-slate-950">{value}</p>
+          )}
         </div>
         <div className="rounded-md bg-ecu-mint p-2 text-ecu-green">
           <Icon size={20} />
         </div>
       </div>
-      <p className="mt-3 text-sm text-slate-600">{detail}</p>
+      <p className="mt-3 text-sm text-slate-600">{loading ? 'Fetching Supabase records...' : detail}</p>
     </div>
   );
 }
 
-function RoomSearch({ rooms, openRoom }: { rooms: Room[]; openRoom: (id: string) => void }) {
+function LoadingPanelMessage({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-[140px] items-center justify-center gap-3 p-6 text-sm font-semibold text-slate-600" role="status" aria-live="polite">
+      <span className="loading-spinner" aria-hidden="true" />
+      {label}
+    </div>
+  );
+}
+
+function DataLoadProgressBanner({ progress }: { progress: RoomDataLoadProgress }) {
+  return (
+    <div className="border-b border-ecu-teal/30 bg-ecu-mint px-4 py-3 text-sm text-slate-800 lg:px-8" role="status" aria-live="polite">
+      <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
+        <div className="flex items-center gap-3">
+          <span className="loading-spinner h-4 w-4" aria-hidden="true" />
+          <span className="font-semibold">{progress.message}</span>
+          <span className="text-slate-600">
+            {progress.completedSteps}/{progress.totalSteps} datasets
+            {progress.loadedRows ? ` - ${progress.loadedRows.toLocaleString()} rows` : ''}
+          </span>
+        </div>
+        <span className="font-bold text-ecu-black">{progress.percent}%</span>
+      </div>
+      <div className="mt-2 h-2 overflow-hidden rounded-full bg-white">
+        <div className="h-2 rounded-full bg-ecu-teal transition-all" style={{ width: `${progress.percent}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function RoomSearch({
+  rooms,
+  campuses,
+  attributes,
+  openRoom,
+  roomDataLoading,
+  loadProgress,
+}: {
+  rooms: Room[];
+  campuses: Campus[];
+  attributes: AttributeDefinition[];
+  openRoom: (id: string) => void;
+  roomDataLoading: boolean;
+  loadProgress: RoomDataLoadProgress | null;
+}) {
   const [query, setQuery] = useState('');
   const [campus, setCampus] = useState('All');
   const [category, setCategory] = useState('All');
   const [flags, setFlags] = useState<string[]>([]);
   const [minCapacity, setMinCapacity] = useState('');
   const [capability, setCapability] = useState('');
+  const deferredQuery = useDeferredValue(query);
+  const deferredCapability = useDeferredValue(capability);
+  const deferredMinCapacity = useDeferredValue(minCapacity);
+  const searchIndex = useMemo(() => rooms.map((room) => ({
+    room,
+    displayName: roomDisplayName(room),
+    searchText: [
+      room.roomCode,
+      room.name,
+      getRoomFinalName(room),
+      roomDisplayName(room),
+      room.campus,
+      room.building,
+      room.floor,
+      room.type,
+      room.owner,
+      room.bookingStatus,
+      room.pattern,
+      getRoomCapacityDisplay(room, attributes),
+      room.capabilities.join(' '),
+      ...Object.values(room.attributes).map(formatAttributeValue),
+    ].join(' ').toLowerCase(),
+  })), [attributes, rooms]);
+  const campusOptions = useMemo(() => {
+    const names = [
+      ...campuses.map((item) => item.name),
+      ...rooms.map((room) => room.campus),
+    ].filter((name) => name && !name.startsWith('Unmapped'));
+
+    return ['All', ...Array.from(new Set(names)).sort((a, b) => a.localeCompare(b))];
+  }, [campuses, rooms]);
+
+  useEffect(() => {
+    if (!campusOptions.includes(campus)) setCampus('All');
+  }, [campus, campusOptions]);
 
   const filteredRooms = useMemo(() => {
-    const q = query.toLowerCase();
-    return rooms.filter((room) => {
-      const textMatch = [room.roomCode, room.name, room.campus, room.building, room.floor, room.type, room.owner, room.bookingStatus, room.pattern, room.capabilities.join(' ')]
-        .join(' ')
-        .toLowerCase()
-        .includes(q);
+    const q = deferredQuery.trim().toLowerCase();
+    const capabilitySearch = deferredCapability.trim().toLowerCase();
+    const capacityFloor = Number(deferredMinCapacity);
+    return searchIndex.filter(({ room, searchText }) => {
+      const textMatch = !q || searchText.includes(q);
       const campusMatch = campus === 'All' || room.campus === campus;
       const categoryMatch = category === 'All' || room.category === category;
-      const capacityMatch = !minCapacity || room.capacity >= Number(minCapacity);
-      const capabilityMatch = !capability || room.capabilities.some((item) => item.toLowerCase().includes(capability.toLowerCase()));
+      const capacityMatch = !deferredMinCapacity || getRoomCapacityNumber(room, attributes) >= capacityFloor;
+      const capabilityMatch = !capabilitySearch || room.capabilities.some((item) => item.toLowerCase().includes(capabilitySearch));
       const flagMatch = flags.every((flag) => {
         if (flag === 'Teaching') return room.isTeaching;
         if (flag === 'Bookable') return room.isBookable;
@@ -318,8 +673,9 @@ function RoomSearch({ rooms, openRoom }: { rooms: Room[]; openRoom: (id: string)
         return true;
       });
       return textMatch && campusMatch && categoryMatch && capacityMatch && capabilityMatch && flagMatch;
-    });
-  }, [rooms, query, campus, category, flags, minCapacity, capability]);
+    }).map(({ room }) => room);
+  }, [attributes, searchIndex, deferredQuery, campus, category, flags, deferredMinCapacity, deferredCapability]);
+  const visibleRooms = filteredRooms.slice(0, roomSearchRenderLimit);
 
   const toggleFlag = (flag: string) => {
     setFlags((current) => (current.includes(flag) ? current.filter((item) => item !== flag) : [...current, flag]));
@@ -341,7 +697,7 @@ function RoomSearch({ rooms, openRoom }: { rooms: Room[]; openRoom: (id: string)
               <input id="search" className="input pl-10" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Room code, owner, capability..." />
             </div>
           </div>
-          <FilterSelect label="Campus" value={campus} setValue={setCampus} options={['All', ...campuses.map((item) => item.name)]} />
+          <FilterSelect label="Campus" value={campus} setValue={setCampus} options={campusOptions} />
           <FilterSelect label="Category" value={category} setValue={setCategory} options={['All', ...categories.map((item) => item.name)]} />
           <div>
             <label className="label" htmlFor="capacity">Min capacity</label>
@@ -366,20 +722,44 @@ function RoomSearch({ rooms, openRoom }: { rooms: Room[]; openRoom: (id: string)
       </div>
 
       <div className="mt-5 grid gap-4">
-        {filteredRooms.map((room) => (
+        {roomDataLoading && (
+          <div className="panel rounded-lg p-5">
+            <div className="flex items-center justify-between gap-4">
+              <div className="flex items-center gap-3">
+                <span className="loading-spinner" aria-hidden="true" />
+                <div>
+                  <p className="font-bold text-slate-950">{loadProgress?.message ?? 'Loading room data'}</p>
+                  <p className="mt-1 text-sm text-slate-600">Room Search will fill in as soon as Supabase finishes loading.</p>
+                </div>
+              </div>
+              <span className="text-lg font-bold text-ecu-black">{loadProgress?.percent ?? 0}%</span>
+            </div>
+            <div className="mt-4 h-2 overflow-hidden rounded-full bg-slate-100">
+              <div className="h-2 rounded-full bg-ecu-teal transition-all" style={{ width: `${loadProgress?.percent ?? 0}%` }} />
+            </div>
+          </div>
+        )}
+        <div className="flex flex-col gap-1 text-sm text-slate-600 sm:flex-row sm:items-center sm:justify-between">
+          <p>
+            Showing {visibleRooms.length.toLocaleString()} of {filteredRooms.length.toLocaleString()} matching room{filteredRooms.length === 1 ? '' : 's'}
+          </p>
+          {filteredRooms.length > roomSearchRenderLimit && (
+            <p className="font-medium text-slate-700">Refine filters to narrow the result list, or export all matches.</p>
+          )}
+        </div>
+        {visibleRooms.map((room) => (
           <button key={room.id} onClick={() => openRoom(room.id)} className="panel rounded-lg p-4 text-left hover:border-ecu-teal">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-slate-950">{room.roomCode}</h3>
-                  <span className="text-slate-500">{room.name}</span>
-                  {room.qualityFlags.length > 0 && <span className="badge border-amber-200 bg-amber-50 text-amber-700"><AlertTriangle size={13} /> Data flag</span>}
+                  <h3 className="text-lg font-bold text-slate-950">{roomDisplayName(room)}</h3>
+                  {getActiveRoomQualityFlags(room).length > 0 && <span className="badge border-amber-200 bg-amber-50 text-amber-700"><AlertTriangle size={13} /> Data flag</span>}
                 </div>
                 <p className="mt-1 text-sm text-slate-600">{room.campus} · {room.building} · {room.floor}</p>
               </div>
               <div className="grid gap-2 text-sm sm:grid-cols-4 lg:min-w-[560px]">
                 <Fact label="Pattern" value={room.pattern} />
-                <Fact label="Capacity" value={room.capacity} />
+                <Fact label="Capacity" value={getRoomCapacityDisplay(room, attributes)} />
                 <Fact label="Booking" value={room.bookingStatus} />
                 <Fact label="Owner" value={room.owner} />
               </div>
@@ -414,17 +794,35 @@ function Fact({ label, value }: { label: string; value: string | number | boolea
   );
 }
 
-function RoomDetail({ room }: { room: Room }) {
+function RoomDetail({ room, attributes }: { room: Room; attributes: AttributeDefinition[] }) {
   const roomMappings = mappings.filter((mapping) => mapping.roomId === room.id);
-  const attributeRows = Object.entries(room.attributes).map(([key, value]) => ({
-    label: initialAttributeDefinitions.find((attribute) => attribute.key === key)?.label ?? titleCase(key),
-    value: Array.isArray(value) ? value.join(', ') : String(value),
-  }));
+  const attributeRows = Object.entries(room.attributes).map(([key, value]) => {
+    const loadedDefinition = attributes.find((attribute) => attribute.key === key);
+    const dictionaryDefinition = roomDataDictionaryByKey.get(key)
+      ?? (loadedDefinition ? findAttributeDefinitionForHeader(loadedDefinition.label) : undefined)
+      ?? findAttributeDefinitionForHeader(key);
+    const loadedGroup = normalizeAttributeGroup(loadedDefinition?.group);
+    const definition = loadedDefinition ?? dictionaryDefinition;
+    const group = loadedGroup === customImportFieldGroup ? dictionaryDefinition?.group ?? loadedGroup : loadedGroup;
+
+    return {
+      key,
+      group: normalizeAttributeGroup(group),
+      label: definition?.label ?? titleCase(key),
+      value: formatAttributeValue(value),
+      description: loadedDefinition?.description ?? dictionaryDefinition?.description,
+    };
+  }).sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label));
+  const groupedAttributeRows = attributeRows.reduce<Record<string, typeof attributeRows>>((groups, row) => {
+    groups[row.group] = [...(groups[row.group] ?? []), row];
+    return groups;
+  }, {});
+  const groupedAttributeEntries = Object.entries(groupedAttributeRows).sort(([a], [b]) => compareRoomDataDictionaryGroups(a, b));
 
   return (
     <>
       <PageHeader
-        title={`${room.roomCode} · ${room.name}`}
+        title={roomDisplayName(room)}
         description="A single governed room profile separating physical asset facts from booking, access, integration, and audit information."
       />
       <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
@@ -434,7 +832,7 @@ function RoomDetail({ room }: { room: Room }) {
               <Fact label="Campus" value={room.campus} />
               <Fact label="Building" value={room.building} />
               <Fact label="Floor" value={room.floor} />
-              <Fact label="Capacity" value={room.capacity} />
+              <Fact label="Capacity" value={getRoomCapacityDisplay(room, attributes)} />
               <Fact label="Category" value={room.category} />
               <Fact label="Pattern" value={room.pattern} />
               <Fact label="Owner" value={room.owner} />
@@ -450,14 +848,27 @@ function RoomDetail({ room }: { room: Room }) {
           />
 
           <div className="panel rounded-lg">
-            <SectionTitle icon={Database} title="Structured Attributes" />
-            <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-3">
-              {attributeRows.map((row) => (
-                <div key={row.label} className="rounded-md border border-slate-200 p-3">
-                  <p className="label">{row.label}</p>
-                  <p className="mt-1 font-semibold text-slate-800">{row.value}</p>
-                </div>
-              ))}
+            <SectionTitle icon={Database} title="Data Dictionary Fields" />
+            <div className="space-y-4 p-4">
+              {groupedAttributeEntries.length ? groupedAttributeEntries.map(([group, rows]) => (
+                <section key={group}>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold uppercase text-slate-700">{group}</h4>
+                    <span className="badge border-slate-200 bg-slate-50 text-slate-600">{rows.length} populated</span>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                    {rows.map((row) => (
+                      <div key={row.key} className="rounded-md border border-slate-200 p-3">
+                        <p className="label">{row.label}</p>
+                        <p className="mt-1 break-words font-semibold text-slate-800">{row.value}</p>
+                        {row.description && <p className="mt-2 text-xs leading-5 text-slate-500">{row.description}</p>}
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              )) : (
+                <p className="text-sm text-slate-600">No dictionary attributes have been captured for this room yet.</p>
+              )}
             </div>
           </div>
 
@@ -498,7 +909,7 @@ function RoomDetail({ room }: { room: Room }) {
           <div className="panel rounded-lg p-4">
             <h3 className="font-bold text-slate-950">Data Quality</h3>
             <div className="mt-3 space-y-2">
-              {room.qualityFlags.length ? room.qualityFlags.map((flag) => (
+              {getActiveRoomQualityFlags(room).length ? getActiveRoomQualityFlags(room).map((flag) => (
                 <div key={flag} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{flag}</div>
               )) : <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">No known data conflicts.</div>}
             </div>
@@ -552,16 +963,92 @@ function StatusBadge({ status }: { status: string }) {
   return <span className={cn('badge', tone)}>{status}</span>;
 }
 
-function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void }) {
+function Admin({ rooms, setRooms, attributes, setAttributes, campuses, buildings }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void; campuses: Campus[]; buildings: Building[] }) {
   const [editingId, setEditingId] = useState(rooms[0].id);
   const room = rooms.find((item) => item.id === editingId) ?? rooms[0];
-  const [draft, setDraft] = useState(room);
+  const [draft, setDraft] = useState(() => roomDraftWithFinalName(room));
   const [newAttribute, setNewAttribute] = useState({ key: '', label: '', type: 'boolean', group: 'General' });
+  const [expandedFloors, setExpandedFloors] = useState<Set<string>>(() => new Set([floorGroupLabel(room)]));
+  const [selectedCampus, setSelectedCampus] = useState(() => room.campus && !room.campus.startsWith('Unmapped') ? room.campus : '');
+  const [roomAdminSearch, setRoomAdminSearch] = useState('');
+  const draftCampusRecord = campuses.find((item) => item.name === draft.campus);
+  const campusOptions = useMemo(() => {
+    const names = [
+      ...campuses.map((item) => item.name),
+      ...rooms.map((item) => item.campus),
+    ].filter((name) => name && !name.startsWith('Unmapped'));
+
+    return Array.from(new Set(names)).sort((a, b) => a.localeCompare(b));
+  }, [campuses, rooms]);
+  const buildingOptions = useMemo(() => {
+    const campusScopedBuildings = draftCampusRecord
+      ? buildings.filter((item) => item.campusCode === draftCampusRecord.code)
+      : buildings;
+
+    return campusScopedBuildings.map((item) => buildingDisplayName(item.code, item.campusCode, buildings));
+  }, [buildings, draftCampusRecord]);
+  const adminRooms = useMemo(() => {
+    const searchTerm = roomAdminSearch.trim().toLowerCase();
+    return rooms
+      .filter((item) => item.campus === selectedCampus)
+      .filter((item) => {
+        if (!searchTerm) return true;
+        return [item.roomCode, item.name, getRoomFinalName(item), roomDisplayName(item)]
+          .join(' ')
+          .toLowerCase()
+          .includes(searchTerm);
+      });
+  }, [rooms, roomAdminSearch, selectedCampus]);
+  const roomGroupsByFloor = useMemo(() => {
+    const groups = new Map<string, Room[]>();
+    adminRooms.forEach((item) => {
+      const floor = floorGroupLabel(item);
+      groups.set(floor, [...(groups.get(floor) ?? []), item]);
+    });
+
+    return Array.from(groups.entries())
+      .map(([floor, floorRooms]) => ({
+        floor,
+        rooms: [...floorRooms].sort((a, b) => roomDisplayName(a).localeCompare(roomDisplayName(b), undefined, { numeric: true })),
+      }))
+      .sort((a, b) => {
+        const sortDifference = floorSortValue(a.floor) - floorSortValue(b.floor);
+        return sortDifference || floorDisplayName(a.floor).localeCompare(floorDisplayName(b.floor), undefined, { numeric: true });
+      });
+  }, [adminRooms]);
+
+  useEffect(() => {
+    setExpandedFloors((current) => {
+      const next = new Set(current);
+      next.add(floorGroupLabel(room));
+      return next;
+    });
+  }, [room]);
+
+  useEffect(() => {
+    if (!campusOptions.includes(selectedCampus)) setSelectedCampus(campusOptions[0] ?? '');
+  }, [campusOptions, selectedCampus]);
+
+  useEffect(() => {
+    if (!adminRooms.length || adminRooms.some((item) => item.id === editingId)) return;
+    const next = roomDraftWithFinalName(adminRooms[0]);
+    setEditingId(adminRooms[0].id);
+    setDraft(next);
+  }, [adminRooms, editingId]);
 
   const selectRoom = (id: string) => {
     const next = rooms.find((item) => item.id === id) ?? rooms[0];
     setEditingId(id);
-    setDraft(next);
+    setDraft(roomDraftWithFinalName(next));
+  };
+
+  const toggleFloor = (floor: string) => {
+    setExpandedFloors((current) => {
+      const next = new Set(current);
+      if (next.has(floor)) next.delete(floor);
+      else next.add(floor);
+      return next;
+    });
   };
 
   const saveRoom = () => {
@@ -570,7 +1057,17 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
       alert('Please complete room code, name, campus, building, capacity, owner, and pattern.');
       return;
     }
-    setRooms(rooms.map((item) => (item.id === draft.id ? { ...draft, qualityFlags: draft.qualityFlags.filter((flag) => flag !== 'Unsaved admin edits') } : item)));
+    const finalName = draft.name.trim();
+    const savedDraft = {
+      ...draft,
+      name: finalName,
+      attributes: {
+        ...draft.attributes,
+        [finalRoomNameAttributeKey]: finalName,
+      },
+      qualityFlags: draft.qualityFlags.filter((flag) => flag !== 'Unsaved admin edits'),
+    };
+    setRooms(rooms.map((item) => (item.id === draft.id ? savedDraft : item)));
   };
 
   const addAttribute = () => {
@@ -590,6 +1087,22 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
     setNewAttribute({ key: '', label: '', type: 'boolean', group: 'General' });
   };
 
+  const updateDraftAttribute = (attribute: AttributeDefinition, value: string | number | boolean | string[]) => {
+    setDraft((current) => {
+      const nextAttributes = {
+        ...current.attributes,
+        [attribute.key]: value,
+      };
+      const nextQualityFlags = [...new Set([...current.qualityFlags, 'Unsaved admin edits'])];
+
+      if (attribute.key === finalRoomNameAttributeKey && typeof value === 'string') {
+        return { ...current, name: value, attributes: nextAttributes, qualityFlags: nextQualityFlags };
+      }
+
+      return { ...current, attributes: nextAttributes, qualityFlags: nextQualityFlags };
+    });
+  };
+
   return (
     <>
       <PageHeader
@@ -600,13 +1113,51 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
       <section className="grid gap-6 xl:grid-cols-[320px_1fr]">
         <div className="panel rounded-lg">
           <SectionTitle icon={Building2} title="Rooms" />
+          <div className="border-b border-slate-200 p-3">
+            <FilterSelect label="Campus" value={selectedCampus} setValue={setSelectedCampus} options={campusOptions} />
+            <label className="mt-3 block">
+              <span className="label">Find room</span>
+              <div className="relative mt-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                <input
+                  className="input pl-9"
+                  value={roomAdminSearch}
+                  onChange={(event) => setRoomAdminSearch(event.target.value)}
+                  placeholder="Room ID or name"
+                />
+              </div>
+            </label>
+          </div>
           <div className="max-h-[680px] overflow-auto p-2">
-            {rooms.map((item) => (
-              <button key={item.id} onClick={() => selectRoom(item.id)} className={cn('w-full rounded-md p-3 text-left text-sm hover:bg-slate-50', item.id === editingId && 'bg-ecu-mint text-ecu-black')}>
-                <p className="font-bold">{item.roomCode}</p>
-                <p className="text-slate-600">{item.name}</p>
-              </button>
-            ))}
+            {roomGroupsByFloor.length === 0 && (
+              <p className="p-3 text-sm text-slate-600">No rooms found for this campus.</p>
+            )}
+            {roomGroupsByFloor.map((group) => {
+              const isExpanded = expandedFloors.has(group.floor);
+              return (
+                <section key={group.floor} className="mb-2">
+                  <button
+                    className="flex w-full items-center justify-between rounded-md px-3 py-2 text-left text-sm font-bold text-slate-800 hover:bg-slate-50"
+                    onClick={() => toggleFloor(group.floor)}
+                  >
+                    <span className="flex min-w-0 items-center gap-2">
+                      <ChevronRight size={16} className={cn('shrink-0 text-slate-500 transition-transform', isExpanded && 'rotate-90')} />
+                      <span className="truncate">{floorDisplayName(group.floor)}</span>
+                    </span>
+                    <span className="badge border-slate-200 bg-white text-slate-600">{group.rooms.length}</span>
+                  </button>
+                  {isExpanded && (
+                    <div className="mt-1 space-y-1 border-l border-slate-200 pl-6">
+                      {group.rooms.map((item) => (
+                        <button key={item.id} onClick={() => selectRoom(item.id)} className={cn('w-full rounded-md px-3 py-2 text-left text-sm text-slate-700 hover:bg-slate-50', item.id === editingId && 'bg-ecu-mint text-ecu-black')}>
+                          <p className="font-normal">{roomDisplayName(item)}</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
           </div>
         </div>
 
@@ -614,9 +1165,34 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
           <div className="panel rounded-lg p-4">
             <div className="grid gap-4 md:grid-cols-2">
               <TextInput label="Room code" value={draft.roomCode} onChange={(value) => setDraft({ ...draft, roomCode: value, qualityFlags: [...new Set([...draft.qualityFlags, 'Unsaved admin edits'])] })} />
-              <TextInput label="Name" value={draft.name} onChange={(value) => setDraft({ ...draft, name: value })} />
-              <FilterSelect label="Campus" value={draft.campus} setValue={(value) => setDraft({ ...draft, campus: value })} options={campuses.map((item) => item.name)} />
-              <FilterSelect label="Building" value={draft.building} setValue={(value) => setDraft({ ...draft, building: value })} options={buildings.map((item) => `${item.code} ${item.name}`)} />
+              <TextInput
+                label="Name"
+                value={draft.name}
+                onChange={(value) => setDraft({
+                  ...draft,
+                  name: value,
+                  attributes: { ...draft.attributes, [finalRoomNameAttributeKey]: value },
+                  qualityFlags: [...new Set([...draft.qualityFlags, 'Unsaved admin edits'])],
+                })}
+              />
+              <FilterSelect
+                label="Campus"
+                value={draft.campus}
+                setValue={(value) => {
+                  const nextCampus = campuses.find((item) => item.name === value);
+                  const nextBuildingOptions = buildings
+                    .filter((item) => !nextCampus || item.campusCode === nextCampus.code)
+                    .map((item) => buildingDisplayName(item.code, item.campusCode, buildings));
+                  setDraft({
+                    ...draft,
+                    campus: value,
+                    building: nextBuildingOptions.includes(draft.building) ? draft.building : '',
+                    qualityFlags: [...new Set([...draft.qualityFlags, 'Unsaved admin edits'])],
+                  });
+                }}
+                options={campusOptions}
+              />
+              <FilterSelect label="Building" value={draft.building} setValue={(value) => setDraft({ ...draft, building: value, qualityFlags: [...new Set([...draft.qualityFlags, 'Unsaved admin edits'])] })} options={buildingOptions} />
               <TextInput label="Floor" value={draft.floor} onChange={(value) => setDraft({ ...draft, floor: value })} />
               <TextInput label="Capacity" value={String(draft.capacity)} onChange={(value) => setDraft({ ...draft, capacity: Number(value) || 0 })} />
               <FilterSelect label="Pattern" value={draft.pattern} setValue={(value) => setDraft({ ...draft, pattern: value })} options={patterns.map((item) => item.name)} />
@@ -638,11 +1214,12 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
             <SectionTitle icon={KeyRound} title="Configurable Attributes" />
             <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
               {attributes.map((attribute) => (
-                <div key={attribute.key} className="rounded-md border border-slate-200 p-3">
-                  <p className="font-semibold text-slate-900">{attribute.label}</p>
-                  <p className="mt-1 text-sm text-slate-600">{attribute.type} · {attribute.group}</p>
-                  <p className="mt-2 text-xs text-slate-500">{attribute.downstreamSystems.join(', ') || 'No downstream mapping yet'}</p>
-                </div>
+                <AttributeEditor
+                  key={attribute.key}
+                  attribute={attribute}
+                  value={draft.attributes[attribute.key]}
+                  onChange={(value) => updateDraftAttribute(attribute, value)}
+                />
               ))}
             </div>
             <div className="border-t border-slate-200 p-4">
@@ -660,6 +1237,517 @@ function Admin({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; 
         </div>
       </section>
     </>
+  );
+}
+
+function CampusManagement({
+  rooms,
+  setRooms,
+  campuses,
+  setCampuses,
+  buildings,
+  setBuildings,
+}: {
+  rooms: Room[];
+  setRooms: (rooms: Room[]) => void;
+  campuses: Campus[];
+  setCampuses: (campuses: Campus[]) => void;
+  buildings: Building[];
+  setBuildings: (buildings: Building[]) => void;
+}) {
+  const [showOnlyUnmapped, setShowOnlyUnmapped] = useState(false);
+  const [autoDetectBuildingAndFloor, setAutoDetectBuildingAndFloor] = useState(true);
+  const unmappedRooms = rooms.filter((room) => !room.campus || room.campus.startsWith('Unmapped'));
+  const suggestedCampusCode = unmappedRooms[0]?.roomCode.split('.')[0] ?? '';
+  const [roomPrefixFilter, setRoomPrefixFilter] = useState(suggestedCampusCode || 'CC');
+  const roomsMatchingPrefix = rooms.filter((room) => {
+    const prefix = roomPrefixFilter.trim().toUpperCase();
+    if (!prefix) return showOnlyUnmapped ? (!room.campus || room.campus.startsWith('Unmapped')) : true;
+    return room.roomCode.toUpperCase().startsWith(`${prefix}.`) || room.roomCode.toUpperCase().startsWith(prefix);
+  });
+  const candidateRooms = showOnlyUnmapped ? roomsMatchingPrefix.filter((room) => !room.campus || room.campus.startsWith('Unmapped')) : roomsMatchingPrefix;
+  const [campusDraft, setCampusDraft] = useState<Campus>({ code: suggestedCampusCode, name: suggestedCampusCode ? `${suggestedCampusCode} Campus` : '', address: '' });
+  const [buildingDraft, setBuildingDraft] = useState<Building>({ code: '', name: '', campusCode: suggestedCampusCode || campuses[0]?.code || '', owner: 'Campus Operations' });
+  const [editingBuildingKey, setEditingBuildingKey] = useState<{ campusCode: string; code: string } | null>(null);
+  const [selectedCampusCode, setSelectedCampusCode] = useState(suggestedCampusCode || campuses[0]?.code || '');
+  const [expandedCampusCodes, setExpandedCampusCodes] = useState<string[]>(() => [suggestedCampusCode || campuses[0]?.code || ''].filter(Boolean));
+  const [selectedRoomIds, setSelectedRoomIds] = useState<string[]>([]);
+  const selectedRoomIdSet = useMemo(() => new Set(selectedRoomIds), [selectedRoomIds]);
+  const [mappingProgress, setMappingProgress] = useState<CampusMappingProgress | null>(null);
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+
+  const selectedCampus = campuses.find((campus) => campus.code === selectedCampusCode);
+  const roomsToMap = useMemo(() => rooms.filter((room) => selectedRoomIdSet.has(room.id)), [rooms, selectedRoomIdSet]);
+  const isMappingRooms = Boolean(mappingProgress);
+  const buildingsByCampus = useMemo(() => {
+    return campuses.map((campus) => ({
+      campus,
+      buildings: buildings
+        .filter((building) => building.campusCode === campus.code)
+        .sort((a, b) => a.code.localeCompare(b.code)),
+    }));
+  }, [buildings, campuses]);
+
+  const toggleCampusExpanded = (code: string) => {
+    setExpandedCampusCodes((current) => current.includes(code) ? current.filter((item) => item !== code) : [...current, code]);
+  };
+
+  const selectCampusForEdit = (campus: Campus) => {
+    setCampusDraft(campus);
+    setSelectedCampusCode(campus.code);
+    setBuildingDraft((current) => ({ ...current, campusCode: campus.code }));
+    setExpandedCampusCodes((current) => current.includes(campus.code) ? current : [...current, campus.code]);
+  };
+
+  const selectBuildingForEdit = (building: Building) => {
+    setBuildingDraft(building);
+    setEditingBuildingKey({ campusCode: building.campusCode, code: building.code });
+    setSelectedCampusCode(building.campusCode);
+    setExpandedCampusCodes((current) => current.includes(building.campusCode) ? current : [...current, building.campusCode]);
+    setStatusMessage(`Editing building ${building.code}.`);
+    setErrorMessage('');
+  };
+
+  const startNewBuilding = (campusCode = selectedCampusCode || campuses[0]?.code || '') => {
+    setBuildingDraft({ code: '', name: '', campusCode, owner: 'Campus Operations' });
+    setEditingBuildingKey(null);
+    setSelectedCampusCode(campusCode);
+    if (campusCode) setExpandedCampusCodes((current) => current.includes(campusCode) ? current : [...current, campusCode]);
+  };
+
+  const saveCampus = async () => {
+    const code = campusDraft.code.trim().toUpperCase();
+    const name = campusDraft.name.trim();
+    if (!code || !name) {
+      setErrorMessage('Campus code and name are required.');
+      return;
+    }
+    const nextCampus = { ...campusDraft, code, name };
+    try {
+      const result = await persistCampusDetails(nextCampus);
+      setCampuses(campuses.some((campus) => campus.code === code)
+        ? campuses.map((campus) => campus.code === code ? nextCampus : campus)
+        : [...campuses, nextCampus]);
+      setSelectedCampusCode(code);
+      setBuildingDraft({ ...buildingDraft, campusCode: code });
+      setStatusMessage(result.action === 'supabase'
+        ? `Campus ${code} saved to Supabase. You can now map imported rooms to it.`
+        : `Campus ${code} saved in demo state. You can now map imported rooms to it.`);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not save campus.');
+    }
+  };
+
+  const saveBuilding = async () => {
+    const code = buildingDraft.code.trim();
+    const name = buildingDraft.name.trim();
+    if (!buildingDraft.campusCode || !code || !name) {
+      setErrorMessage('Building campus, code, and name are required.');
+      return;
+    }
+    const nextBuilding = { ...buildingDraft, code, name };
+    const nextCampuses = campuses.some((campus) => campus.code === nextBuilding.campusCode) ? campuses : [...campuses, campusDraft];
+    try {
+      const result = await persistBuildingDetails(nextBuilding, nextCampuses);
+      const changedBuildingKey = editingBuildingKey
+        && (editingBuildingKey.campusCode !== nextBuilding.campusCode || editingBuildingKey.code !== nextBuilding.code);
+      if (changedBuildingKey) {
+        const previousBuilding = buildings.find((building) => building.campusCode === editingBuildingKey.campusCode && building.code === editingBuildingKey.code);
+        if (previousBuilding) await persistBuildingRemoval(previousBuilding, campuses);
+      }
+      const buildingsWithoutPrevious = changedBuildingKey
+        ? buildings.filter((building) => !(building.campusCode === editingBuildingKey.campusCode && building.code === editingBuildingKey.code))
+        : buildings;
+      setBuildings(buildingsWithoutPrevious.some((building) => building.campusCode === nextBuilding.campusCode && building.code === nextBuilding.code)
+        ? buildingsWithoutPrevious.map((building) => building.campusCode === nextBuilding.campusCode && building.code === nextBuilding.code ? nextBuilding : building)
+        : [...buildingsWithoutPrevious, nextBuilding]);
+      setSelectedCampusCode(nextBuilding.campusCode);
+      setExpandedCampusCodes((current) => current.includes(nextBuilding.campusCode) ? current : [...current, nextBuilding.campusCode]);
+      setEditingBuildingKey({ campusCode: nextBuilding.campusCode, code: nextBuilding.code });
+      setStatusMessage(result.action === 'supabase' ? `Building ${nextBuilding.code} saved to Supabase.` : `Building ${nextBuilding.code} saved in demo state.`);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not save building.');
+    }
+  };
+
+  const removeCampus = async (campus: Campus) => {
+    const campusBuildings = buildings.filter((building) => building.campusCode === campus.code);
+    if (campusBuildings.length) {
+      setErrorMessage(`Remove ${campusBuildings.length} building(s) from ${campus.code} before removing the campus.`);
+      return;
+    }
+
+    try {
+      const result = await persistCampusRemoval(campus);
+      const nextCampuses = campuses.filter((item) => item.code !== campus.code);
+      setCampuses(nextCampuses);
+      if (selectedCampusCode === campus.code) {
+        const nextCampusCode = nextCampuses[0]?.code ?? '';
+        setSelectedCampusCode(nextCampusCode);
+        setBuildingDraft({ code: '', name: '', campusCode: nextCampusCode, owner: 'Campus Operations' });
+      }
+      setExpandedCampusCodes((current) => current.filter((code) => code !== campus.code));
+      setStatusMessage(result.action === 'supabase' ? `Campus ${campus.code} removed from active Supabase data.` : `Campus ${campus.code} removed from demo state.`);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not remove campus.');
+    }
+  };
+
+  const removeBuilding = async (building: Building) => {
+    try {
+      const result = await persistBuildingRemoval(building, campuses);
+      setBuildings(buildings.filter((item) => !(item.campusCode === building.campusCode && item.code === building.code)));
+      if (buildingDraft.campusCode === building.campusCode && buildingDraft.code === building.code) {
+        setBuildingDraft({ code: '', name: '', campusCode: building.campusCode, owner: 'Campus Operations' });
+        setEditingBuildingKey(null);
+      }
+      setStatusMessage(result.action === 'supabase' ? `Building ${building.code} removed from active Supabase data.` : `Building ${building.code} removed from demo state.`);
+      setErrorMessage('');
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not remove building.');
+    }
+  };
+
+  const toggleRoom = (roomId: string) => {
+    setSelectedRoomIds((current) => current.includes(roomId) ? current.filter((id) => id !== roomId) : [...current, roomId]);
+  };
+
+  const mapRooms = async () => {
+    if (isMappingRooms) return;
+    if (!selectedCampus || !roomsToMap.length) {
+      setErrorMessage('Select a campus and at least one room to map.');
+      return;
+    }
+
+    setErrorMessage('');
+    setStatusMessage('');
+    setMappingProgress({
+      percent: 0,
+      completed: 0,
+      total: roomsToMap.length,
+      message: 'Preparing room mapping',
+    });
+    try {
+      const result = await persistCampusMapping({
+        campus: selectedCampus,
+        rooms: roomsToMap,
+        autoDetectBuildingAndFloor,
+        onProgress: setMappingProgress,
+      });
+      const inferredBuildings = autoDetectBuildingAndFloor
+        ? roomsToMap.flatMap((room) => {
+            const parsed = parseRoomCode(room.roomCode);
+            if (!parsed) return [];
+            return [{
+              code: parsed.buildingCode,
+              name: buildingDraft.code === parsed.buildingCode && buildingDraft.campusCode === selectedCampus.code
+                ? buildingDraft.name
+                : `Building ${parsed.buildingCode}`,
+              campusCode: selectedCampus.code,
+              owner: 'Campus Operations',
+            }];
+          })
+        : [];
+      if (inferredBuildings.length) {
+        const nextBuildings = [...buildings];
+        inferredBuildings.forEach((building) => {
+          if (!nextBuildings.some((item) => item.campusCode === building.campusCode && item.code === building.code)) {
+            nextBuildings.push(building);
+          }
+        });
+        setBuildings(nextBuildings);
+      }
+      setRooms(rooms.map((room) => selectedRoomIdSet.has(room.id)
+        ? mapRoomToCampusLocation(room, selectedCampus, buildings, autoDetectBuildingAndFloor)
+        : room));
+      setSelectedRoomIds([]);
+      setStatusMessage(result.action === 'supabase'
+        ? `${result.mapped} room(s) mapped and saved to Supabase.`
+        : `${result.mapped} room(s) mapped in demo state.`);
+    } catch (error) {
+      setErrorMessage(error instanceof Error ? error.message : 'Could not map rooms.');
+    } finally {
+      setMappingProgress(null);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Campus and Building Management"
+        description="Create and edit campus/building reference data, then map imported rooms that arrived with missing or unmapped campus details."
+      />
+      {statusMessage && <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">{statusMessage}</div>}
+      {errorMessage && <div className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">{errorMessage}</div>}
+      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-6">
+          <div className="panel rounded-lg p-4">
+            <h3 className="font-bold text-slate-950">Campus Details</h3>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <TextInput label="Campus code" value={campusDraft.code} onChange={(value) => setCampusDraft({ ...campusDraft, code: value })} />
+              <TextInput label="Campus name" value={campusDraft.name} onChange={(value) => setCampusDraft({ ...campusDraft, name: value })} />
+              <div className="md:col-span-2">
+                <TextInput label="Address" value={campusDraft.address ?? ''} onChange={(value) => setCampusDraft({ ...campusDraft, address: value })} />
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <button className="btn-primary" onClick={saveCampus}><CheckCircle2 size={16} /> Save campus</button>
+              {suggestedCampusCode && (
+                <button className="btn-secondary" onClick={() => setCampusDraft({ code: suggestedCampusCode, name: `${suggestedCampusCode} Campus`, address: '' })}>
+                  Use suggested code {suggestedCampusCode}
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="panel rounded-lg p-4">
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="font-bold text-slate-950">Building Details</h3>
+              <button className="btn-secondary py-1 text-xs" onClick={() => startNewBuilding()}><Plus size={14} /> New building</button>
+            </div>
+            <div className="mt-4 grid gap-3 md:grid-cols-2">
+              <FilterSelect label="Campus" value={buildingDraft.campusCode} setValue={(value) => setBuildingDraft({ ...buildingDraft, campusCode: value })} options={campuses.map((campus) => campus.code)} />
+              <TextInput label="Building code" value={buildingDraft.code} onChange={(value) => setBuildingDraft({ ...buildingDraft, code: value })} />
+              <TextInput label="Building name" value={buildingDraft.name} onChange={(value) => setBuildingDraft({ ...buildingDraft, name: value })} />
+              <TextInput label="Owner" value={buildingDraft.owner} onChange={(value) => setBuildingDraft({ ...buildingDraft, owner: value })} />
+            </div>
+            <div className="mt-4">
+              <button className="btn-primary" onClick={saveBuilding}><CheckCircle2 size={16} /> Save building</button>
+            </div>
+          </div>
+
+          <div className="panel rounded-lg">
+            <SectionTitle icon={Building2} title="Existing Campuses" />
+            <div className="divide-y divide-slate-200">
+              {buildingsByCampus.map(({ campus, buildings: campusBuildings }) => (
+                <div key={campus.code}>
+                  <div className="flex flex-col gap-3 p-4 hover:bg-slate-50 sm:flex-row sm:items-center sm:justify-between">
+                    <button className="flex min-w-0 flex-1 items-start gap-3 text-left" onClick={() => {
+                      toggleCampusExpanded(campus.code);
+                      selectCampusForEdit(campus);
+                    }}>
+                      <ChevronRight size={18} className={cn('mt-0.5 shrink-0 text-slate-500 transition-transform', expandedCampusCodes.includes(campus.code) && 'rotate-90')} />
+                      <span className="min-w-0">
+                        <span className="block font-semibold text-slate-950">{campus.code} - {campus.name}</span>
+                        <span className="block text-sm text-slate-600">{campusBuildings.length} building(s)</span>
+                      </span>
+                    </button>
+                    <div className="flex flex-wrap gap-2 sm:justify-end">
+                      <button className="btn-secondary py-1 text-xs" onClick={() => selectCampusForEdit(campus)}><Pencil size={14} /> Edit campus</button>
+                      <button className="btn-secondary py-1 text-xs" onClick={() => startNewBuilding(campus.code)}><Plus size={14} /> Add building</button>
+                      <button
+                        className="btn-secondary py-1 text-xs"
+                        onClick={() => {
+                          if (window.confirm(`Remove campus ${campus.code}?`)) void removeCampus(campus);
+                        }}
+                      >
+                        <Trash2 size={14} /> Remove
+                      </button>
+                    </div>
+                  </div>
+                  {expandedCampusCodes.includes(campus.code) && (
+                    <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                      {campusBuildings.length ? (
+                        <div className="grid gap-2">
+                          {campusBuildings.map((building) => (
+                            <div key={`${building.campusCode}-${building.code}`} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <p className="font-semibold text-slate-950">{buildingDisplayName(building.code, building.campusCode, buildings)}</p>
+                                <p className="text-sm text-slate-600">{building.owner || 'No owner recorded'}</p>
+                              </div>
+                              <div className="flex flex-wrap gap-2 sm:justify-end">
+                                <button className="btn-secondary py-1 text-xs" onClick={() => selectBuildingForEdit(building)}><Pencil size={14} /> Edit</button>
+                                <button
+                                  className="btn-secondary py-1 text-xs"
+                                  onClick={() => {
+                                    if (window.confirm(`Remove building ${buildingDisplayName(building.code, building.campusCode, buildings)}?`)) void removeBuilding(building);
+                                  }}
+                                >
+                                  <Trash2 size={14} /> Remove
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <div className="rounded-md border border-dashed border-slate-300 bg-white p-3 text-sm text-slate-600">
+                          No buildings recorded for this campus yet.
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-6">
+          <div className="panel rounded-lg p-4">
+            <h3 className="font-bold text-slate-950">Map Imported Rooms</h3>
+            <p className="mt-1 text-sm text-slate-600">Find imported rooms by room-code prefix and assign them to a governed campus.</p>
+            <div className="mt-4 grid gap-3 md:grid-cols-3">
+              <TextInput label="Room code prefix" value={roomPrefixFilter} onChange={setRoomPrefixFilter} />
+              <FilterSelect label="Target campus" value={selectedCampusCode} setValue={setSelectedCampusCode} options={campuses.map((campus) => campus.code)} />
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm text-slate-600">
+                Building and floor are detected from room IDs like CC.1N.245A.
+              </div>
+            </div>
+            <div className="mt-4 flex flex-wrap gap-2">
+              <Toggle label="Only unmapped campus" checked={showOnlyUnmapped} onChange={setShowOnlyUnmapped} />
+              <Toggle label="Auto-detect building/floor from room ID" checked={autoDetectBuildingAndFloor} onChange={setAutoDetectBuildingAndFloor} />
+              <button className="btn-secondary" disabled={isMappingRooms} onClick={() => setSelectedRoomIds(candidateRooms.map((room) => room.id))}>Select matching rooms</button>
+              <button className="btn-secondary" disabled={isMappingRooms} onClick={() => setSelectedRoomIds([])}>Clear selection</button>
+              <button className="btn-primary" disabled={isMappingRooms || !selectedRoomIds.length} onClick={mapRooms}>
+                {isMappingRooms ? <span className="loading-spinner h-4 w-4" aria-hidden="true" /> : <CheckCircle2 size={16} />}
+                {isMappingRooms ? 'Mapping rooms...' : 'Map selected rooms'}
+              </button>
+            </div>
+            {mappingProgress && (
+              <div className="mt-4 rounded-md border border-ecu-teal/30 bg-ecu-mint p-3" role="status" aria-live="polite">
+                <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                  <div className="flex items-center gap-3 font-semibold text-ecu-black">
+                    <span className="loading-spinner" aria-hidden="true" />
+                    {mappingProgress.message}
+                  </div>
+                  <span className="font-bold text-ecu-green">{mappingProgress.percent}% complete</span>
+                </div>
+                <div className="mt-3 h-2 overflow-hidden rounded-full bg-white">
+                  <div className="h-full rounded-full bg-ecu-teal transition-all" style={{ width: `${mappingProgress.percent}%` }} />
+                </div>
+                <p className="mt-2 text-xs font-medium text-slate-600">
+                  {mappingProgress.completed} of {mappingProgress.total} selected room(s) processed
+                </p>
+              </div>
+            )}
+          </div>
+
+          <div className="panel rounded-lg">
+            <div className="flex items-center justify-between border-b border-slate-200 p-4">
+              <h3 className="font-bold text-slate-950">Unmapped Rooms</h3>
+              <StatusBadge status={`${candidateRooms.length} matching`} />
+            </div>
+            <div className="max-h-[560px] divide-y divide-slate-200 overflow-auto">
+              {candidateRooms.length ? candidateRooms.map((room) => (
+                <label key={room.id} className="flex cursor-pointer items-start gap-3 p-4 hover:bg-slate-50">
+                  <input
+                    type="checkbox"
+                    className="mt-1 h-4 w-4 accent-ecu-teal"
+                    checked={selectedRoomIdSet.has(room.id)}
+                    disabled={isMappingRooms}
+                    onChange={() => toggleRoom(room.id)}
+                  />
+                  <span>
+                    <span className="block font-semibold text-slate-950">{roomDisplayName(room)}</span>
+                    <span className="block text-sm text-slate-600">{room.campus} · {room.building} · {room.floor}</span>
+                  </span>
+                </label>
+              )) : (
+                <div className="p-4 text-sm text-slate-600">
+                  No matching rooms are currently loaded. Try changing the prefix or click Reload data in the header.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AttributeEditor({
+  attribute,
+  value,
+  onChange,
+}: {
+  attribute: AttributeDefinition;
+  value: string | number | boolean | string[] | undefined;
+  onChange: (value: string | number | boolean | string[]) => void;
+}) {
+  const textValue = Array.isArray(value) ? value.join(', ') : typeof value === 'boolean' ? (value ? 'Yes' : 'No') : String(value ?? '');
+  const options = attribute.options ?? [];
+
+  const input = (() => {
+    if (attribute.type === 'boolean') {
+      return (
+        <div className="mt-3">
+          <Toggle label={value === true ? 'Yes' : 'No'} checked={value === true} onChange={onChange} />
+        </div>
+      );
+    }
+
+    if (attribute.type === 'number') {
+      return (
+        <input
+          className="input mt-2"
+          type="number"
+          value={typeof value === 'number' ? value : textValue}
+          onChange={(event) => {
+            const nextValue = event.target.value;
+            const parsed = Number(nextValue);
+            onChange(nextValue === '' || !Number.isFinite(parsed) ? nextValue : parsed);
+          }}
+        />
+      );
+    }
+
+    if (attribute.type === 'date') {
+      return (
+        <input
+          className="input mt-2"
+          type="date"
+          value={textValue}
+          onChange={(event) => onChange(event.target.value)}
+        />
+      );
+    }
+
+    if (attribute.type === 'select') {
+      return (
+        <select className="input mt-2" value={textValue} onChange={(event) => onChange(event.target.value)}>
+          <option value="">Unspecified</option>
+          {options.map((option) => <option key={option} value={option}>{option}</option>)}
+          {textValue && !options.includes(textValue) && <option value={textValue}>{textValue}</option>}
+        </select>
+      );
+    }
+
+    if (attribute.type === 'multi-select' || attribute.type === 'tag') {
+      return (
+        <textarea
+          className="input mt-2 min-h-20"
+          value={textValue}
+          onChange={(event) => onChange(event.target.value.split(',').map((item) => item.trim()).filter(Boolean))}
+        />
+      );
+    }
+
+    return (
+      <input
+        className="input mt-2"
+        type={attribute.type === 'url' ? 'url' : 'text'}
+        value={textValue}
+        onChange={(event) => onChange(event.target.value)}
+      />
+    );
+  })();
+
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <label className="font-semibold text-slate-900">{attribute.label}</label>
+          <p className="mt-1 text-sm text-slate-600">{attribute.type} - {attribute.group}</p>
+        </div>
+        {attribute.required && <span className="badge border-amber-200 bg-amber-50 text-amber-700">Required</span>}
+      </div>
+      {input}
+      <p className="mt-2 text-xs text-slate-500">{attribute.downstreamSystems.join(', ') || 'No downstream mapping yet'}</p>
+    </div>
   );
 }
 
@@ -688,6 +1776,23 @@ function Toggle({ label, checked, onChange, icon: Icon = CheckCircle2 }: { label
       {label}
     </button>
   );
+}
+
+function mapRoomToCampusLocation(room: Room, campus: Campus, buildings: Building[], autoDetectBuildingAndFloor: boolean): Room {
+  const parsed = autoDetectBuildingAndFloor ? parseRoomCode(room.roomCode) : null;
+  return {
+    ...room,
+    campus: campus.name,
+    building: parsed ? buildingDisplayName(parsed.buildingCode, campus.code, buildings) : room.building,
+    floor: parsed ? floorNameFromCode(parsed.floorCode) : room.floor,
+    qualityFlags: [
+      ...new Set(
+        room.qualityFlags
+          .filter((flag) => !flag.includes('Imported record pending validation'))
+          .concat(parsed ? 'Campus, building, and floor mapped after import' : 'Campus mapped after import'),
+      ),
+    ],
+  };
 }
 
 function Patterns() {
@@ -800,7 +1905,7 @@ function Governance({ requests, setRequests, rooms }: { requests: ChangeRequest[
                     <StatusBadge status={request.status} />
                     <StatusBadge status={request.risk === 'high' ? 'High risk' : 'Standard risk'} />
                   </div>
-                  <p className="mt-1 text-sm text-slate-600">{room ? `${room.roomCode} · ${room.name}` : 'No room linked'} · {request.requestType}</p>
+                  <p className="mt-1 text-sm text-slate-600">{room ? roomDisplayName(room) : 'No room linked'} · {request.requestType}</p>
                   <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-700">{request.reason}</p>
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -853,37 +1958,194 @@ function generateTasks(request: ChangeRequest) {
   }));
 }
 
-function ChangeRequestList({ requests, compact = false }: { requests: ChangeRequest[]; compact?: boolean }) {
+function RoomsNeedingAttention({
+  rooms,
+  openRoom,
+  loading,
+  limit = 5,
+}: {
+  rooms: Room[];
+  openRoom: (id: string) => void;
+  loading: boolean;
+  limit?: number;
+}) {
+  const flaggedRooms = rooms.filter((room) => getActiveRoomQualityFlags(room).length);
+  const visibleRooms = flaggedRooms.slice(0, limit);
+  const flagSummary = Array.from(flaggedRooms.reduce((summary, room) => {
+    getActiveRoomQualityFlags(room).forEach((flag) => summary.set(flag, (summary.get(flag) ?? 0) + 1));
+    return summary;
+  }, new Map<string, number>()))
+    .sort(([, firstCount], [, secondCount]) => secondCount - firstCount)
+    .slice(0, 3);
+
   return (
     <div className="panel rounded-lg">
-      <div className="border-b border-slate-200 p-4">
-        <h3 className="font-bold text-slate-950">Change Requests</h3>
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+        <h3 className="font-bold text-slate-950">Rooms Needing Attention</h3>
+        {!loading && <span className="badge border-amber-200 bg-amber-50 text-amber-700">{flaggedRooms.length} flagged</span>}
       </div>
-      <div className="divide-y divide-slate-200">
-        {requests.slice(0, compact ? 3 : requests.length).map((request) => (
-          <div key={request.id} className="p-4">
-            <div className="flex flex-wrap items-center gap-2">
-              <p className="font-semibold text-slate-950">{request.id} · {request.title}</p>
-              <StatusBadge status={request.status} />
-            </div>
-            <p className="mt-1 text-sm text-slate-600">{request.impactedSystems.join(', ')}</p>
+      {loading ? (
+        <LoadingPanelMessage label="Loading room quality data" />
+      ) : flaggedRooms.length === 0 ? (
+        <p className="p-4 text-sm text-slate-600">No rooms are currently flagged for attention.</p>
+      ) : (
+        <>
+          <div className="grid gap-2 border-b border-slate-200 bg-slate-50 p-4 md:grid-cols-3">
+            {flagSummary.map(([flag, count]) => (
+              <div key={flag} className="rounded-md border border-slate-200 bg-white p-3">
+                <p className="text-sm font-semibold text-slate-900">{count} rooms</p>
+                <p className="mt-1 text-xs text-slate-600">{flag}</p>
+              </div>
+            ))}
           </div>
-        ))}
-      </div>
+          <div className="divide-y divide-slate-200">
+            {visibleRooms.map((room) => {
+              const flagDetails = getRoomFlagDetails(room);
+              return (
+                <button key={room.id} onClick={() => openRoom(room.id)} className="flex w-full items-start justify-between gap-4 p-4 text-left hover:bg-slate-50">
+                  <div className="min-w-0 space-y-3">
+                    <div>
+                      <p className="font-semibold text-slate-950">{roomDisplayName(room)}</p>
+                      <p className="mt-1 text-sm text-slate-600">{room.building} - {room.floor}</p>
+                    </div>
+                    <div className="space-y-2">
+                      {flagDetails.map((detail) => (
+                        <div key={detail.flag} className="rounded-md border border-amber-200 bg-amber-50 p-3">
+                          <p className="text-sm font-semibold text-amber-900">{detail.flag}</p>
+                          <p className="mt-1 text-sm leading-5 text-amber-800">{detail.reason}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <ChevronRight className="mt-1 shrink-0 text-slate-400" size={18} />
+                </button>
+              );
+            })}
+          </div>
+          {flaggedRooms.length > visibleRooms.length && (
+            <p className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+              Showing {visibleRooms.length} of {flaggedRooms.length} flagged rooms. Use Room Search for the full list.
+            </p>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
-function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void }) {
+function getRoomFlagDetails(room: Room) {
+  return getActiveRoomQualityFlags(room).map((flag) => ({
+    flag,
+    reason: describeRoomQualityFlag(room, flag),
+  }));
+}
+
+function getActiveRoomQualityFlags(room: Room) {
+  return room.qualityFlags.filter((flag) => !isResolvedLocationMappingFlag(flag));
+}
+
+function isResolvedLocationMappingFlag(flag: string) {
+  const normalizedFlag = flag.toLowerCase();
+  return normalizedFlag.includes('mapped after import')
+    && (normalizedFlag.includes('campus') || normalizedFlag.includes('building') || normalizedFlag.includes('floor'));
+}
+
+function describeRoomQualityFlag(room: Room, flag: string) {
+  const normalizedFlag = flag.toLowerCase();
+  const impactedSystems = room.downstreamSystems.length ? room.downstreamSystems.join(', ') : 'no downstream systems';
+  const bookingContext = `${room.bookingStatus}; ${room.isBookable ? 'bookable' : 'not bookable'}; ${room.isStudentAccessible ? 'student accessible' : 'staff or controlled access'}`;
+
+  if (normalizedFlag.includes('appspace')) {
+    return `This room is connected to Appspace but the dashboard has no confirmed Appspace verification. Check the room signage/panel record before relying on the downstream mapping.`;
+  }
+
+  if (normalizedFlag.includes('security') || normalizedFlag.includes('access group')) {
+    const accessGroup = room.attributes.student_access_group;
+    const accessGroupText = typeof accessGroup === 'string' && accessGroup.trim() ? ` Current access group: ${accessGroup}.` : ' No student access group is recorded.';
+    return `Access settings need review because the room is ${room.isStudentAccessible ? 'student accessible' : 'restricted'} and maps to ${impactedSystems}.${accessGroupText}`;
+  }
+
+  if (normalizedFlag.includes('imported update')) {
+    return `An import changed this existing room. Review the updated fields before they flow into governed systems: ${impactedSystems}.`;
+  }
+
+  if (normalizedFlag.includes('imported record')) {
+    return `This room was created from imported source data and has not yet been validated against the room dictionary, location hierarchy, and downstream systems.`;
+  }
+
+  if (normalizedFlag.includes('campus') || normalizedFlag.includes('building') || normalizedFlag.includes('floor') || normalizedFlag.includes('mapped after import')) {
+    return `The location was inferred during import. Confirm campus, building, and floor before using this room for reporting or system updates.`;
+  }
+
+  if (normalizedFlag.includes('unsaved admin')) {
+    return `Room details were edited in the admin view and still need to be saved or reviewed before the flag can be cleared.`;
+  }
+
+  if (normalizedFlag.includes('missing')) {
+    return `Required supporting data appears to be missing. Current room context: ${bookingContext}; downstream systems: ${impactedSystems}.`;
+  }
+
+  if (normalizedFlag.includes('review')) {
+    return `This room is queued for manual review because its current settings may affect booking, access, or downstream integrations. Current room context: ${bookingContext}.`;
+  }
+
+  return `Flag recorded in data quality checks. Review the room details, source import values, and downstream mappings before clearing it. Current room context: ${bookingContext}; downstream systems: ${impactedSystems}.`;
+}
+
+function ChangeRequestList({ requests, compact = false, limit }: { requests: ChangeRequest[]; compact?: boolean; limit?: number }) {
+  const visibleLimit = limit ?? (compact ? 3 : requests.length);
+  const visibleRequests = requests.slice(0, visibleLimit);
+
+  return (
+    <div className="panel rounded-lg">
+      <div className="flex items-center justify-between gap-3 border-b border-slate-200 p-4">
+        <h3 className="font-bold text-slate-950">Change Requests</h3>
+        <span className="badge border-slate-200 bg-slate-50 text-slate-600">{requests.length} total</span>
+      </div>
+      <div className="divide-y divide-slate-200">
+        {visibleRequests.map((request) => (
+          <div key={request.id} className="p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <p className="font-semibold text-slate-950">{request.id} - {request.title}</p>
+              <StatusBadge status={request.status} />
+              <StatusBadge status={request.risk === 'high' ? 'High risk' : 'Standard risk'} />
+            </div>
+            <p className="mt-1 text-sm text-slate-600">{request.impactedSystems.join(', ')}</p>
+            {!compact && <p className="mt-2 text-sm leading-6 text-slate-700">{request.reason}</p>}
+          </div>
+        ))}
+      </div>
+      {requests.length > visibleRequests.length && (
+        <p className="border-t border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          Showing {visibleRequests.length} of {requests.length} requests. Open Governance for the full workflow.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function ImportWizard({ rooms, setRooms, attributes, setAttributes, refreshRoomData }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void; refreshRoomData: () => void }) {
   const [stage, setStage] = useState<ImportStage>('upload');
+  const [filename, setFilename] = useState('room-import.csv');
   const [headers, setHeaders] = useState<string[]>([]);
   const [rows, setRows] = useState<Record<string, string>[]>([]);
   const [mapping, setMapping] = useState<Record<string, string>>({});
   const [createdFields, setCreatedFields] = useState<AttributeDefinition[]>([]);
   const [committed, setCommitted] = useState(false);
+  const [isCommitting, setIsCommitting] = useState(false);
+  const [commitError, setCommitError] = useState('');
+  const [commitResult, setCommitResult] = useState<PersistImportResult | null>(null);
+  const attributeFieldOptions = useMemo(() => {
+    const byKey = new Map([...roomDataDictionaryDefinitions, ...attributes].map((attribute) => [attribute.key, attribute]));
+    return Array.from(byKey.values()).sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label));
+  }, [attributes]);
+  const mappedDictionaryDefinitions = useMemo(() => {
+    const mappedKeys = new Set(Object.values(mapping).flatMap((destination) => destination.startsWith('attr:') ? [destination.slice(5)] : []));
+    return attributeFieldOptions.filter((field) => mappedKeys.has(field.key));
+  }, [attributeFieldOptions, mapping]);
 
   const preview = useMemo<ImportPreviewRow[]>(() => {
-    return rows.slice(0, 20).map((row, index) => {
+    return rows.map((row, index) => {
       const roomCodeHeader = Object.entries(mapping).find(([, destination]) => destination === 'roomCode')?.[0];
       const roomCode = roomCodeHeader ? row[roomCodeHeader] : '';
       const issues: string[] = [];
@@ -891,12 +2153,17 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
       if (roomCode && !/^[A-Z]{2}\./.test(roomCode)) issues.push('Invalid room code format');
       const duplicate = rooms.some((room) => room.roomCode === roomCode);
       const unknownMappings = Object.values(mapping).filter((destination) => destination === 'create_dynamic_attribute').length;
+      const dictionaryMappings = Object.values(mapping).filter((destination) => destination.startsWith('attr:')).length;
       if (unknownMappings) issues.push(`${unknownMappings} dynamic field(s) to create`);
+      if (dictionaryMappings) issues.push(`${dictionaryMappings} dictionary field(s) mapped`);
       return { id: index + 1, source: row, action: issues.some((issue) => issue.startsWith('Invalid') || issue.startsWith('Missing')) ? 'error' : duplicate ? 'update' : 'create', issues };
     });
   }, [rows, mapping, rooms]);
 
   const errorRows = preview.filter((row) => row.action === 'error');
+  const previewRowsToShow = errorRows.length
+    ? [...errorRows, ...preview.filter((row) => row.action !== 'error')].slice(0, 50)
+    : preview.slice(0, 50);
   const rowsToCreate = preview.filter((row) => row.action === 'create').length;
   const rowsToUpdate = preview.filter((row) => row.action === 'update').length;
   const hasRoomCodeMapping = Object.values(mapping).includes('roomCode');
@@ -905,6 +2172,7 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
   const handleFile = (event: ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
     if (!file) return;
+    setFilename(file.name);
     Papa.parse<Record<string, string>>(file, {
       header: true,
       skipEmptyLines: true,
@@ -912,20 +2180,23 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
         const parsedHeaders = result.meta.fields ?? [];
         setHeaders(parsedHeaders);
         setRows(result.data);
-        setMapping(Object.fromEntries(parsedHeaders.map((header) => [header, suggestMapping(header)])));
+        setMapping(Object.fromEntries(parsedHeaders.map((header) => [header, suggestMapping(header, attributeFieldOptions)])));
+        setCreatedFields([]);
         setCommitted(false);
+        setCommitError('');
+        setCommitResult(null);
         setStage('mapping');
       },
     });
   };
 
   const createDynamicField = (header: string) => {
-    const key = header.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    const key = makeAttributeKey(header);
     const field: AttributeDefinition = {
       key,
       label: titleCase(header),
       type: inferType(rows.map((row) => row[header])),
-      group: 'Imported',
+      group: customImportFieldGroup,
       required: false,
       visible: true,
       downstreamSystems: [],
@@ -935,7 +2206,37 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
     setStage('mapping');
   };
 
-  const commitImport = () => {
+  const createDynamicFieldsForHeaders = (headersToCreate: string[]) => {
+    const nextFields = [...createdFields];
+    headersToCreate.forEach((header) => {
+      const key = makeAttributeKey(header);
+      if (!key || nextFields.some((field) => field.key === key) || attributes.some((field) => field.key === key)) return;
+      nextFields.push({
+        key,
+        label: titleCase(header),
+        type: inferType(rows.map((row) => row[header])),
+        group: customImportFieldGroup,
+        required: false,
+        visible: true,
+        downstreamSystems: [],
+      });
+    });
+    setCreatedFields(nextFields);
+  };
+
+  const setAllFieldsToDynamicAttributes = () => {
+    const headersToCreate = headers.filter((header) => mapping[header] !== 'roomCode');
+    createDynamicFieldsForHeaders(headersToCreate);
+    setMapping({
+      ...mapping,
+      ...Object.fromEntries(headersToCreate.map((header) => [header, 'create_dynamic_attribute'])),
+    });
+    setCommitted(false);
+    setCommitResult(null);
+    setCommitError('');
+  };
+
+  const applyImportLocally = () => {
     const validRows = preview.filter((row) => row.action !== 'error');
     const roomCodeHeader = Object.entries(mapping).find(([, destination]) => destination === 'roomCode')?.[0];
     const nextRooms = [...rooms];
@@ -943,7 +2244,7 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
       const source = previewRow.source;
       const code = roomCodeHeader ? source[roomCodeHeader] : `IMPORT.${previewRow.id}`;
       const existingIndex = nextRooms.findIndex((room) => room.roomCode === code);
-      const mapped = mapSourceToRoom(source, mapping, createdFields);
+      const mapped = mapSourceToRoom(source, mapping, mergeAttributeDefinitions(createdFields, mappedDictionaryDefinitions));
       if (existingIndex >= 0) {
         nextRooms[existingIndex] = { ...nextRooms[existingIndex], ...mapped, qualityFlags: [...new Set([...nextRooms[existingIndex].qualityFlags, 'Imported update pending governance review'])] };
       } else {
@@ -976,19 +2277,39 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
       }
     });
     setRooms(nextRooms);
-    setAttributes([...attributes, ...createdFields.filter((field) => !attributes.some((attribute) => attribute.key === field.key))]);
-    setCommitted(true);
-    setStage('approval');
+    setAttributes(mergeAttributeDefinitions(attributes, createdFields, mappedDictionaryDefinitions));
+  };
+
+  const commitImport = async () => {
+    setIsCommitting(true);
+    setCommitError('');
+    try {
+      const result = await persistImportToSupabase({
+        filename,
+        rows: preview,
+        mapping,
+        createdFields: mergeAttributeDefinitions(createdFields, mappedDictionaryDefinitions),
+      });
+      applyImportLocally();
+      setCommitResult(result);
+      setCommitted(true);
+      setStage('approval');
+      if (result.action === 'supabase') await refreshRoomData();
+    } catch (error) {
+      setCommitError(error instanceof Error ? error.message : 'Import failed while saving to Supabase.');
+    } finally {
+      setIsCommitting(false);
+    }
   };
 
   return (
     <>
-      <PageHeader title="Advanced CSV Import" description="Upload, map, validate, create dynamic fields, preview impacts, and commit controlled room updates with import audit support." />
+      <PageHeader title="Dictionary-Ready Room Import" description="Upload room data, map source columns to core room fields or any governed data dictionary field, validate impacts, and commit controlled updates." />
       <section className="grid gap-6">
         <div className="panel rounded-lg p-4">
           <div className="grid gap-4 lg:grid-cols-[1fr_1fr_1fr]">
             <ImportStep icon={Upload} title="1. Upload file" detail="CSV with UTF-8 headers and room rows." active={stage === 'upload'} complete={headers.length > 0} />
-            <ImportStep icon={Filter} title="2. Map and validate" detail="Map columns, create fields, review issues." active={stage === 'mapping'} complete={canApproveImport || stage === 'approval'} />
+            <ImportStep icon={Filter} title="2. Map and validate" detail={`${roomDataDictionaryDefinitions.length} dictionary fields are ready.`} active={stage === 'mapping'} complete={canApproveImport || stage === 'approval'} />
             <ImportStep icon={CheckCircle2} title="3. Approve and commit" detail="Review impact summary before committing." active={stage === 'approval'} complete={committed} />
           </div>
           <div className="mt-5">
@@ -1002,7 +2323,15 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
 
         {headers.length > 0 && stage === 'mapping' && (
           <div className="panel rounded-lg">
-            <SectionTitle icon={Settings2} title="Column Mapping" />
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-4 md:flex-row md:items-center md:justify-between">
+              <div className="flex items-center gap-2">
+                <Settings2 size={18} className="text-ecu-teal" />
+                <h3 className="font-bold text-slate-950">Column Mapping</h3>
+              </div>
+              <button className="btn-secondary" onClick={setAllFieldsToDynamicAttributes}>
+                <Plus size={16} /> Set unmapped fields to dynamic attributes
+              </button>
+            </div>
             <div className="grid gap-3 p-4">
               {headers.map((header) => (
                 <div key={header} className="grid gap-3 rounded-md border border-slate-200 p-3 md:grid-cols-[1fr_1fr_auto] md:items-center">
@@ -1014,7 +2343,12 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
                     setMapping({ ...mapping, [header]: event.target.value });
                     setCommitted(false);
                   }}>
-                    {fieldOptions.map((option) => <option key={option} value={option}>{titleCase(option)}</option>)}
+                    <optgroup label="Core room fields">
+                      {coreRoomFieldOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                    </optgroup>
+                    <optgroup label="Data dictionary fields">
+                      {attributeFieldOptions.map((option) => <option key={option.key} value={`attr:${option.key}`}>{formatAttributeOptionLabel(option)}</option>)}
+                    </optgroup>
                   </select>
                   <button className="btn-secondary" onClick={() => createDynamicField(header)}><Plus size={16} /> Create field</button>
                 </div>
@@ -1029,7 +2363,7 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
               <div>
                 <h3 className="font-bold text-slate-950">Validation Preview</h3>
                 <p className="text-sm text-slate-600">
-                  {preview.filter((row) => row.action === 'create').length} create · {preview.filter((row) => row.action === 'update').length} update · {preview.filter((row) => row.action === 'error').length} errors · {createdFields.length} new fields
+                  {preview.filter((row) => row.action === 'create').length} create · {preview.filter((row) => row.action === 'update').length} update · {preview.filter((row) => row.action === 'error').length} errors · {mappedDictionaryDefinitions.length} dictionary fields · {createdFields.length} new fields
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -1044,7 +2378,11 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
             )}
             {errorRows.length > 0 && (
               <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                Resolve validation errors before approving this import.
+                <p className="font-semibold">Resolve {errorRows.length} validation error{errorRows.length === 1 ? '' : 's'} before approving this import.</p>
+                <p className="mt-1">
+                  {errorRows.slice(0, 8).map((row) => `Row ${row.id}: ${row.issues.filter((issue) => issue.startsWith('Invalid') || issue.startsWith('Missing')).join(', ')}`).join(' | ')}
+                  {errorRows.length > 8 ? ` | ${errorRows.length - 8} more` : ''}
+                </p>
               </div>
             )}
             <div className="overflow-x-auto">
@@ -1058,10 +2396,10 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200">
-                  {preview.map((row) => {
+                  {previewRowsToShow.map((row) => {
                     const roomCodeHeader = Object.entries(mapping).find(([, destination]) => destination === 'roomCode')?.[0];
                     return (
-                      <tr key={row.id}>
+                      <tr key={row.id} className={row.action === 'error' ? 'bg-red-50' : undefined}>
                         <td className="px-4 py-3">{row.id}</td>
                         <td className="px-4 py-3"><StatusBadge status={row.action} /></td>
                         <td className="px-4 py-3 font-semibold text-slate-900">{roomCodeHeader ? row.source[roomCodeHeader] : 'Unmapped'}</td>
@@ -1084,13 +2422,25 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
               </div>
               <div className="flex flex-wrap gap-2">
                 <button className="btn-secondary" onClick={() => setStage('mapping')}><Filter size={16} /> Back to mapping</button>
-                <button className="btn-primary" disabled={!canApproveImport || committed} onClick={commitImport}><CheckCircle2 size={16} /> Commit import</button>
+                <button className="btn-primary" disabled={!canApproveImport || committed || isCommitting} onClick={commitImport}>
+                  <CheckCircle2 size={16} /> {isCommitting ? 'Committing...' : 'Commit import'}
+                </button>
               </div>
             </div>
+            <div className={cn('border-b px-4 py-3 text-sm', isSupabaseConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-amber-200 bg-amber-50 text-amber-800')}>
+              {isSupabaseConfigured
+                ? 'Supabase is configured. This import will be written to import_jobs, rooms, room_attribute_definitions, room_attribute_values, and room_change_log.'
+                : 'Supabase is not configured. This commit will update demo data only and will be lost on refresh.'}
+            </div>
+            {commitError && (
+              <div className="border-b border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                {commitError}
+              </div>
+            )}
             <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard icon={Plus} label="Rows to create" value={rowsToCreate} detail="New room records" />
               <MetricCard icon={RefreshCcw} label="Rows to update" value={rowsToUpdate} detail="Existing room records" />
-              <MetricCard icon={KeyRound} label="New dynamic fields" value={createdFields.length} detail={createdFields.map((field) => field.label).join(', ') || 'None'} />
+              <MetricCard icon={KeyRound} label="Dictionary fields" value={mappedDictionaryDefinitions.length} detail={mappedDictionaryDefinitions.slice(0, 4).map((field) => field.label).join(', ') || 'None mapped'} />
               <MetricCard icon={AlertTriangle} label="Validation errors" value={errorRows.length} detail={errorRows.length ? 'Return to mapping' : 'Ready to commit'} />
             </div>
             <div className="border-t border-slate-200 p-4">
@@ -1099,7 +2449,7 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
                 items={[
                   'Import audit history will be recorded',
                   'Updated rooms are flagged for governance review',
-                  'Dynamic fields are added as configurable room attributes',
+                  'Mapped dictionary fields are added as configurable room attributes',
                   'Future Supabase mode maps this flow to import_jobs and room_change_log',
                 ]}
               />
@@ -1109,7 +2459,9 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes }: { rooms: R
 
         {committed && (
           <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-            Import committed to the in-browser MVP dataset. In Supabase mode, this maps to import_jobs, room_change_log, dynamic attribute definitions, and governance approval records.
+            {commitResult?.action === 'supabase'
+              ? `Import committed to Supabase. Import job ${commitResult.importJobId} saved ${commitResult.created} created row(s) and ${commitResult.updated} updated row(s).`
+              : 'Import committed to the in-browser MVP dataset. Configure Supabase and sign in as a room data editor or admin to persist imports.'}
           </div>
         )}
       </section>
@@ -1127,19 +2479,26 @@ function ImportStep({ icon: Icon, title, detail, active, complete }: { icon: typ
   );
 }
 
-function suggestMapping(header: string) {
+function suggestMapping(header: string, attributeOptions: AttributeDefinition[] = roomDataDictionaryDefinitions) {
   const normal = header.toLowerCase().replace(/[^a-z0-9]/g, '');
   if (['roomno', 'roomnumber', 'roomcode', 'room'].includes(normal)) return 'roomCode';
+  if (['campusid'].includes(normal)) return 'campus';
+  if (['buildingid'].includes(normal)) return 'building';
   if (['roomname', 'name'].includes(normal)) return 'name';
+  if (normal === 'finalroomname') return 'name';
+
+  const dictionaryDefinition = findAttributeDefinitionForHeader(header, attributeOptions);
+  if (dictionaryDefinition) return `attr:${dictionaryDefinition.key}`;
+
+  if (normal === 'fullroomnumber') return 'roomCode';
+  if (normal === 'floor' || normal === 'outlookfloorsnumberonly') return 'floor';
   if (normal.includes('campus')) return 'campus';
   if (normal.includes('building')) return 'building';
-  if (normal.includes('floor')) return 'floor';
+  if (normal.includes('floor') && !normal.includes('floorplan')) return 'floor';
   if (normal.includes('capacity') || normal === 'cap') return 'capacity';
   if (normal.includes('owner')) return 'owner';
   if (normal.includes('type') || normal.includes('pattern')) return 'pattern';
-  if (normal.includes('bookable')) return 'student_bookable';
-  if (normal.includes('teams')) return 'teams_enabled';
-  if (normal.includes('lecturecapture')) return 'lecture_capture';
+
   return 'ignore';
 }
 
@@ -1158,11 +2517,13 @@ function mapSourceToRoom(source: Record<string, string>, mapping: Record<string,
     const value = source[header];
     if (!value || destination === 'ignore') return;
     if (destination === 'create_dynamic_attribute') {
-      const key = header.trim().toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      const key = makeAttributeKey(header);
       const field = dynamicFields.find((item) => item.key === key);
       result.attributes![key] = coerceImportValue(value, field?.type ?? 'text');
-    } else if (['student_bookable', 'teams_enabled', 'lecture_capture'].includes(destination)) {
-      result.attributes![destination] = coerceImportValue(value, 'boolean');
+    } else if (destination.startsWith('attr:')) {
+      const key = destination.slice(5);
+      const field = dynamicFields.find((item) => item.key === key) ?? roomDataDictionaryByKey.get(key);
+      result.attributes![key] = coerceImportValue(value, field?.type ?? 'text');
     } else {
       switch (destination) {
         case 'roomCode':
@@ -1186,9 +2547,35 @@ function mapSourceToRoom(source: Record<string, string>, mapping: Record<string,
   return result;
 }
 
+function mergeAttributeDefinitions(...groups: AttributeDefinition[][]) {
+  const byKey = new Map<string, AttributeDefinition>();
+  groups.flat().forEach((attribute) => byKey.set(attribute.key, attribute));
+  return Array.from(byKey.values());
+}
+
+function normalizeAttributeGroup(group?: string) {
+  if (!group || group === 'Imported') return customImportFieldGroup;
+  return group;
+}
+
+function formatAttributeOptionLabel(attribute: AttributeDefinition) {
+  const group = normalizeAttributeGroup(attribute.group);
+  if (group === customImportFieldGroup) return attribute.label;
+  return `${group} - ${attribute.label}`;
+}
+
+function formatAttributeValue(value: string | number | boolean | string[]) {
+  if (Array.isArray(value)) return value.join(', ');
+  if (typeof value === 'boolean') return value ? 'Yes' : 'No';
+  return String(value);
+}
+
 function coerceImportValue(value: string, type: AttributeDefinition['type']) {
-  if (type === 'boolean') return ['yes', 'true', 'y', '1'].includes(value.toLowerCase());
-  if (type === 'number') return Number(value);
+  if (type === 'boolean') return ['yes', 'true', 'y', '1', 'bookable', 'available'].includes(value.toLowerCase());
+  if (type === 'number') {
+    const numberValue = Number(value);
+    return Number.isFinite(numberValue) ? numberValue : value;
+  }
   if (type === 'multi-select') return value.split(',').map((item) => item.trim()).filter(Boolean);
   return value;
 }

@@ -12,6 +12,7 @@ Room Data Hub is a TypeScript React MVP for managing ECU rooms as governed enter
 - Room search with simple and advanced filters
 - Room profile pages separating physical, booking, access, attribute, and system mapping data
 - Admin room editing and configurable attribute management
+- Campus and building management with imported-room remapping
 - Room pattern and category management views
 - Transformation rules view
 - Governance workflow dashboard with approvals, history, and generated implementation checklists
@@ -51,6 +52,35 @@ supabase db reset
 ```
 
 The migration is in `supabase/migrations/202605140001_initial_schema.sql`; sample records are in `supabase/seed.sql`.
+
+For CSV imports to persist, the user must be authenticated through Supabase Auth and have a matching `profiles` row with `role` set to `room_data_editor` or `admin`. Dynamic field creation requires `admin`.
+
+Example profile update after creating a Supabase Auth user:
+
+```sql
+insert into public.profiles (id, display_name, email, role, business_unit)
+values (
+  'AUTH_USER_UUID_HERE',
+  'Room Data Admin',
+  'your.email@ecu.edu.au',
+  'admin',
+  'Digital Campus Operations'
+)
+on conflict (id) do update
+set role = excluded.role;
+```
+
+The import wizard now writes to Supabase when configured and authenticated:
+
+- `import_jobs`
+- `rooms`
+- `room_attribute_definitions`
+- `room_attribute_values`
+- `room_change_log`
+
+If Supabase is not configured, the import wizard still works in demo mode, but imported data is held only in browser state and is lost on refresh.
+
+Campus/building management also writes to Supabase when configured. The signed-in user needs `admin` role because campus, building, and floor reference tables are governed configuration data.
 
 ## Data Model
 

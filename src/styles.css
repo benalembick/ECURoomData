@@ -24,6 +24,12 @@ textarea {
   font: inherit;
 }
 
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 @layer components {
   .panel {
     @apply border border-slate-200 bg-white shadow-panel;
@@ -56,5 +62,10 @@ textarea {
 
   .badge {
     @apply inline-flex items-center rounded-md border px-2 py-1 text-xs font-medium;
+  }
+
+  .loading-spinner {
+    @apply inline-block h-6 w-6 rounded-full border-2 border-slate-200 border-t-ecu-teal;
+    animation: spin 0.8s linear infinite;
   }
 }
