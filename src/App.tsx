@@ -402,6 +402,11 @@ export function App() {
     setView('room-detail');
   };
 
+  const openRoomAdmin = (roomId: string) => {
+    setSelectedRoomId(roomId);
+    setView('admin');
+  };
+
   const openSummarySearch = (summaryLabel: string) => {
     setSummaryFilter(summaryLabel);
     setView('rooms');
@@ -488,8 +493,8 @@ export function App() {
         <main className="p-4 sm:p-6 lg:p-8">
           {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} openSummarySearch={openSummarySearch} roomDataLoading={roomDataLoading} />}
           {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
-          {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} />}
-          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} />}
+          {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} />}
+          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} />}
           {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} />}
           {view === 'rules' && <Rules />}
@@ -1003,7 +1008,7 @@ function Fact({ label, value }: { label: string; value: string | number | boolea
   );
 }
 
-function RoomDetail({ room, attributes }: { room: Room; attributes: AttributeDefinition[] }) {
+function RoomDetail({ room, attributes, openRoomAdmin }: { room: Room; attributes: AttributeDefinition[]; openRoomAdmin: (roomId: string) => void }) {
   const roomMappings = mappings.filter((mapping) => mapping.roomId === room.id);
   const attributeRows = Object.entries(room.attributes).map(([key, value]) => {
     const loadedDefinition = attributes.find((attribute) => attribute.key === key);
@@ -1033,6 +1038,7 @@ function RoomDetail({ room, attributes }: { room: Room; attributes: AttributeDef
       <PageHeader
         title={roomDisplayName(room)}
         description="A single governed room profile separating physical asset facts from booking, access, integration, and audit information."
+        action={<button className="btn-primary" onClick={() => openRoomAdmin(room.id)}><Pencil size={16} /> Edit in Room Admin</button>}
       />
       <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
         <div className="space-y-6">
@@ -1186,6 +1192,7 @@ function Admin({
   campuses,
   buildings,
   patterns,
+  initialRoomId,
 }: {
   rooms: Room[];
   setRooms: (rooms: Room[]) => void;
@@ -1194,13 +1201,15 @@ function Admin({
   campuses: Campus[];
   buildings: Building[];
   patterns: RoomPattern[];
+  initialRoomId: string;
 }) {
-  const [editingId, setEditingId] = useState(rooms[0].id);
+  const initialRoom = rooms.find((item) => item.id === initialRoomId) ?? rooms[0];
+  const [editingId, setEditingId] = useState(initialRoom.id);
   const room = rooms.find((item) => item.id === editingId) ?? rooms[0];
   const [draft, setDraft] = useState(() => roomDraftWithFinalName(room));
   const [newAttribute, setNewAttribute] = useState({ key: '', label: '', type: 'boolean', group: 'General' });
   const [expandedFloors, setExpandedFloors] = useState<Set<string>>(() => new Set([floorGroupLabel(room)]));
-  const [selectedCampus, setSelectedCampus] = useState(() => room.campus && !room.campus.startsWith('Unmapped') ? room.campus : '');
+  const [selectedCampus, setSelectedCampus] = useState(() => initialRoom.campus && !initialRoom.campus.startsWith('Unmapped') ? initialRoom.campus : '');
   const [roomAdminSearch, setRoomAdminSearch] = useState('');
   const draftCampusRecord = campuses.find((item) => item.name === draft.campus);
   const campusOptions = useMemo(() => {
