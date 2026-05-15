@@ -70,7 +70,9 @@ on conflict (id) do update
 set role = excluded.role;
 ```
 
-The import wizard now writes to Supabase when configured and authenticated:
+Room/reference data can be read publicly by anonymous visitors after applying the public-read migration. The login is still required for protected changes such as imports, campus/building management, and admin edits because write policies remain limited to authenticated users with the required role.
+
+The import wizard writes to Supabase when configured and authenticated:
 
 - `import_jobs`
 - `rooms`
@@ -104,7 +106,7 @@ The migration defines these roles:
 - Approver
 - Admin
 
-RLS policies allow authenticated users to read room/reference data, while editors and admins can manage rooms/imports, admins can manage configuration, and approvers can action approval records.
+RLS policies allow anonymous users to read active room/reference data, while editors and admins can manage rooms/imports, admins can manage configuration, and approvers can action approval records.
 
 ## MVP Notes
 

@@ -308,11 +308,12 @@ export function App() {
   const [authUserEmail, setAuthUserEmail] = useState('');
   const [authMessage, setAuthMessage] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [authRequiredMessage, setAuthRequiredMessage] = useState('');
   const [dataMessage, setDataMessage] = useState('');
   const [dataLoading, setDataLoading] = useState(isSupabaseConfigured);
   const [dataLoadProgress, setDataLoadProgress] = useState<RoomDataLoadProgress | null>(
     isSupabaseConfigured
-      ? { percent: 0, completedSteps: 0, totalSteps: 6, message: 'Waiting for Supabase session' }
+      ? { percent: 0, completedSteps: 0, totalSteps: 7, message: 'Loading public Supabase data' }
       : null,
   );
   const [summaryFilter, setSummaryFilter] = useState<string | null>(null);
@@ -359,13 +360,10 @@ export function App() {
   useEffect(() => {
     if (!supabase) return;
 
+    void refreshRoomData();
+
     supabase.auth.getUser().then(({ data }) => {
       setAuthUserEmail(data.user?.email ?? '');
-      if (data.user) void refreshRoomData();
-      if (!data.user) {
-        setDataLoading(false);
-        setDataLoadProgress(null);
-      }
     });
 
     const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
@@ -396,6 +394,12 @@ export function App() {
     setAuthPassword('');
     setAuthMessage('Signed out.');
   };
+
+  const requireAuthenticatedEdit = useCallback((action = 'save changes') => {
+    if (!isSupabaseConfigured || authUserEmail) return true;
+    setAuthRequiredMessage(`Please sign in before you ${action}. Public visitors can view Supabase data, but edits are restricted to authorised users.`);
+    return false;
+  }, [authUserEmail]);
 
   const openRoom = (roomId: string) => {
     setSelectedRoomId(roomId);
@@ -494,13 +498,40 @@ export function App() {
           {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} openSummarySearch={openSummarySearch} roomDataLoading={roomDataLoading} />}
           {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
           {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} />}
-          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} />}
-          {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} />}
-          {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} />}
+          {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'rules' && <Rules />}
-          {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} />}
-          {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} />}
+          {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
         </main>
+      </div>
+      {authRequiredMessage && (
+        <AuthRequiredOverlay
+          message={authRequiredMessage}
+          onClose={() => setAuthRequiredMessage('')}
+        />
+      )}
+    </div>
+  );
+}
+
+function AuthRequiredOverlay({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-950/45 p-4">
+      <div className="w-full max-w-md rounded-lg border border-amber-200 bg-white p-5 shadow-2xl">
+        <div className="flex items-start gap-3">
+          <div className="rounded-md bg-amber-50 p-2 text-amber-700">
+            <ShieldCheck size={22} />
+          </div>
+          <div>
+            <h3 className="text-lg font-bold text-slate-950">Sign in required</h3>
+            <p className="mt-2 text-sm leading-6 text-slate-700">{message}</p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end">
+          <button className="btn-primary" onClick={onClose}>OK</button>
+        </div>
       </div>
     </div>
   );
@@ -567,6 +598,9 @@ function SupabaseAuthControls({
 
   return (
     <div className="flex max-w-[520px] flex-wrap items-center justify-end gap-2">
+      <button className="btn-secondary h-9 px-3 py-1 text-xs" disabled={dataLoading} onClick={refreshRoomData}>
+        <RefreshCcw size={14} /> {dataLoading ? 'Loading...' : 'Reload data'}
+      </button>
       <input
         className="input h-9 w-44"
         type="email"
@@ -1193,6 +1227,7 @@ function Admin({
   buildings,
   patterns,
   initialRoomId,
+  requireAuthenticatedEdit,
 }: {
   rooms: Room[];
   setRooms: (rooms: Room[]) => void;
@@ -1202,6 +1237,7 @@ function Admin({
   buildings: Building[];
   patterns: RoomPattern[];
   initialRoomId: string;
+  requireAuthenticatedEdit: (action?: string) => boolean;
 }) {
   const initialRoom = rooms.find((item) => item.id === initialRoomId) ?? rooms[0];
   const [editingId, setEditingId] = useState(initialRoom.id);
@@ -1292,6 +1328,7 @@ function Admin({
   };
 
   const saveRoom = async () => {
+    if (!requireAuthenticatedEdit('save room admin changes')) return;
     const parsed = roomSchema.safeParse(draft);
     if (!parsed.success) {
       alert('Please complete room code, name, campus, building, capacity, owner, and pattern.');
@@ -1324,6 +1361,7 @@ function Admin({
   };
 
   const addAttribute = () => {
+    if (!requireAuthenticatedEdit('add room attributes')) return;
     if (!newAttribute.key || !newAttribute.label) return;
     setAttributes([
       ...attributes,
@@ -1541,6 +1579,7 @@ function CampusManagement({
   setCampuses,
   buildings,
   setBuildings,
+  requireAuthenticatedEdit,
 }: {
   rooms: Room[];
   setRooms: (rooms: Room[]) => void;
@@ -1548,6 +1587,7 @@ function CampusManagement({
   setCampuses: (campuses: Campus[]) => void;
   buildings: Building[];
   setBuildings: (buildings: Building[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
 }) {
   const [showOnlyUnmapped, setShowOnlyUnmapped] = useState(false);
   const [autoDetectBuildingAndFloor, setAutoDetectBuildingAndFloor] = useState(true);
@@ -1611,6 +1651,7 @@ function CampusManagement({
   };
 
   const saveCampus = async () => {
+    if (!requireAuthenticatedEdit('save campus changes')) return;
     const code = campusDraft.code.trim().toUpperCase();
     const name = campusDraft.name.trim();
     if (!code || !name) {
@@ -1635,6 +1676,7 @@ function CampusManagement({
   };
 
   const saveBuilding = async () => {
+    if (!requireAuthenticatedEdit('save building changes')) return;
     const code = buildingDraft.code.trim();
     const name = buildingDraft.name.trim();
     if (!buildingDraft.campusCode || !code || !name) {
@@ -1668,6 +1710,7 @@ function CampusManagement({
   };
 
   const removeCampus = async (campus: Campus) => {
+    if (!requireAuthenticatedEdit('remove campuses')) return;
     const campusBuildings = buildings.filter((building) => building.campusCode === campus.code);
     if (campusBuildings.length) {
       setErrorMessage(`Remove ${campusBuildings.length} building(s) from ${campus.code} before removing the campus.`);
@@ -1692,6 +1735,7 @@ function CampusManagement({
   };
 
   const removeBuilding = async (building: Building) => {
+    if (!requireAuthenticatedEdit('remove buildings')) return;
     try {
       const result = await persistBuildingRemoval(building, campuses);
       setBuildings(buildings.filter((item) => !(item.campusCode === building.campusCode && item.code === building.code)));
@@ -1711,6 +1755,7 @@ function CampusManagement({
   };
 
   const mapRooms = async () => {
+    if (!requireAuthenticatedEdit('map room locations')) return;
     if (isMappingRooms) return;
     if (!selectedCampus || !roomsToMap.length) {
       setErrorMessage('Select a campus and at least one room to map.');
@@ -2110,11 +2155,13 @@ function Patterns({
   setRooms,
   patterns,
   setPatterns,
+  requireAuthenticatedEdit,
 }: {
   rooms: Room[];
   setRooms: (rooms: Room[]) => void;
   patterns: RoomPattern[];
   setPatterns: (patterns: RoomPattern[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
 }) {
   const [selectedPatternId, setSelectedPatternId] = useState(patterns[0]?.id ?? '');
   const selectedPattern = patterns.find((pattern) => pattern.id === selectedPatternId) ?? patterns[0] ?? emptyPatternDraft;
@@ -2167,6 +2214,7 @@ function Patterns({
   const roomsUsingPattern = rooms.filter((room) => room.pattern === draft.name).length;
 
   const createPattern = () => {
+    if (!requireAuthenticatedEdit('create room patterns')) return;
     const newPattern = {
       ...emptyPatternDraft,
       id: `pattern-${Date.now()}`,
@@ -2178,6 +2226,7 @@ function Patterns({
   };
 
   const savePattern = () => {
+    if (!requireAuthenticatedEdit('save room patterns')) return;
     const cleanedDraft = cleanPatternDraft(draft);
     if (!cleanedDraft.name.trim()) {
       alert('Pattern name is required.');
@@ -2190,6 +2239,7 @@ function Patterns({
   };
 
   const deletePattern = () => {
+    if (!requireAuthenticatedEdit('delete room patterns')) return;
     if (roomsUsingPattern > 0) {
       alert('Move rooms off this pattern before deleting it.');
       return;
@@ -2213,6 +2263,7 @@ function Patterns({
   };
 
   const applyPatternToSelectedRooms = () => {
+    if (!requireAuthenticatedEdit('apply room patterns')) return;
     const selectedIds = selectedRoomIds;
     setRooms(rooms.map((room) => (selectedIds.has(room.id) ? applyPatternToRoom(room, draft) : room)));
     setSelectedRoomIds(new Set());
@@ -2750,8 +2801,19 @@ function Rules() {
   );
 }
 
-function Governance({ requests, setRequests, rooms }: { requests: ChangeRequest[]; setRequests: (requests: ChangeRequest[]) => void; rooms: Room[] }) {
+function Governance({
+  requests,
+  setRequests,
+  rooms,
+  requireAuthenticatedEdit,
+}: {
+  requests: ChangeRequest[];
+  setRequests: (requests: ChangeRequest[]) => void;
+  rooms: Room[];
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
   const updateRequestStatus = (id: string, status: ChangeRequest['status']) => {
+    if (!requireAuthenticatedEdit('update governance requests')) return;
     setRequests(requests.map((request) => {
       if (request.id !== id) return request;
       const generatedTasks = status === 'Approved' && request.tasks.length === 0
@@ -2767,6 +2829,7 @@ function Governance({ requests, setRequests, rooms }: { requests: ChangeRequest[
   };
 
   const completeTask = (requestId: string, taskId: string, status: TaskStatus) => {
+    if (!requireAuthenticatedEdit('update implementation tasks')) return;
     setRequests(requests.map((request) => request.id === requestId
       ? { ...request, tasks: request.tasks.map((task) => task.id === taskId ? { ...task, status } : task), history: [...request.history, `Task ${taskId} set to ${status}`] }
       : request));
@@ -3011,7 +3074,21 @@ function ChangeRequestList({ requests, compact = false, limit }: { requests: Cha
   );
 }
 
-function ImportWizard({ rooms, setRooms, attributes, setAttributes, refreshRoomData }: { rooms: Room[]; setRooms: (rooms: Room[]) => void; attributes: AttributeDefinition[]; setAttributes: (attributes: AttributeDefinition[]) => void; refreshRoomData: () => void }) {
+function ImportWizard({
+  rooms,
+  setRooms,
+  attributes,
+  setAttributes,
+  refreshRoomData,
+  requireAuthenticatedEdit,
+}: {
+  rooms: Room[];
+  setRooms: (rooms: Room[]) => void;
+  attributes: AttributeDefinition[];
+  setAttributes: (attributes: AttributeDefinition[]) => void;
+  refreshRoomData: () => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
   const [stage, setStage] = useState<ImportStage>('upload');
   const [filename, setFilename] = useState('room-import.csv');
   const [headers, setHeaders] = useState<string[]>([]);
@@ -3168,6 +3245,7 @@ function ImportWizard({ rooms, setRooms, attributes, setAttributes, refreshRoomD
   };
 
   const commitImport = async () => {
+    if (!requireAuthenticatedEdit('commit imports')) return;
     setIsCommitting(true);
     setCommitError('');
     try {
