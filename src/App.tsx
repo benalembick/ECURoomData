@@ -15,6 +15,7 @@ import {
   GitBranch,
   History,
   Home,
+  Image as ImageIcon,
   KeyRound,
   Layers3,
   ListChecks,
@@ -95,12 +96,21 @@ const finalRoomNameAttributeKey = 'final_room_name';
 const roomCapacityAttributeKeys = ['capacity_afm_rm_capacity', 'capacity'];
 const roomCapacityAttributeLabels = ['Capacity (Afm.rm.capacity)', 'CAPACITY'];
 const roomSearchRenderLimit = 250;
+const maxFloorplanImageBytes = 900 * 1024;
+const roomFloorplanManifestUrl = '/room-floorplans/manifest.json';
 
 type ImportedRoomFields = Partial<
   Pick<Room, 'roomCode' | 'name' | 'campus' | 'building' | 'floor' | 'capacity' | 'owner' | 'pattern' | 'bookingStatus'>
 > & {
   attributes?: Record<string, string | boolean | number | string[]>;
 };
+
+interface RoomFloorplanManifestEntry {
+  room: string;
+  filename: string;
+}
+
+let roomFloorplanMapPromise: Promise<Map<string, string> | null> | null = null;
 
 function getRoomFinalName(room: Room) {
   const attributeValue = room.attributes[finalRoomNameAttributeKey];
@@ -119,6 +129,84 @@ function roomDisplayName(room: Room) {
 function roomDraftWithFinalName(room: Room): Room {
   const finalName = getRoomFinalName(room);
   return finalName ? { ...room, name: finalName } : room;
+}
+
+function readImageFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    if (!file.type.startsWith('image/')) {
+      reject(new Error('Please choose an image file.'));
+      return;
+    }
+
+    if (file.size > maxFloorplanImageBytes) {
+      reject(new Error('Please choose an image under 900 KB.'));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') resolve(reader.result);
+      else reject(new Error('Could not read the selected image.'));
+    };
+    reader.onerror = () => reject(new Error('Could not read the selected image.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function loadRoomFloorplanMap() {
+  if (roomFloorplanMapPromise) return roomFloorplanMapPromise;
+
+  roomFloorplanMapPromise = fetch(roomFloorplanManifestUrl)
+    .then(async (response) => {
+      if (!response.ok) return null;
+      const entries = await response.json() as RoomFloorplanManifestEntry[];
+      const map = new Map<string, string>();
+
+      entries.forEach((entry) => {
+        if (!entry.room || !entry.filename) return;
+        const filename = entry.filename;
+        const url = `/room-floorplans/${encodeURIComponent(filename)}`;
+        [entry.room, filename.replace(/\.[^.]+$/, '').split(' - ')[0], `CC.${entry.room}`].forEach((roomCode) => {
+          map.set(normalizeRoomCodeKey(roomCode), url);
+        });
+      });
+
+      return map;
+    })
+    .catch(() => null);
+
+  return roomFloorplanMapPromise;
+}
+
+async function applyRoomFloorplanImages(rooms: Room[]) {
+  const floorplanMap = await loadRoomFloorplanMap();
+  if (!floorplanMap) return { rooms, matched: 0 };
+
+  let matched = 0;
+  const roomsWithFloorplans = rooms.map((room) => {
+    if (room.floorplanImageUrl) return room;
+    const floorplanImageUrl = roomFloorplanLookupKeys(room.roomCode)
+      .map((key) => floorplanMap.get(key))
+      .find(Boolean);
+    if (!floorplanImageUrl) return room;
+    matched += 1;
+    return { ...room, floorplanImageUrl };
+  });
+
+  return { rooms: roomsWithFloorplans, matched };
+}
+
+function roomFloorplanLookupKeys(roomCode: string) {
+  const normalized = normalizeRoomCodeKey(roomCode);
+  const parts = normalized.split('.');
+  return [
+    normalized,
+    parts.length > 2 ? parts.slice(1).join('.') : normalized,
+  ];
+}
+
+function normalizeRoomCodeKey(value: string) {
+  return value.trim().toUpperCase().replace(/\s+/g, '');
 }
 
 function getRoomCapacityValue(room: Room, attributes: AttributeDefinition[] = []) {
@@ -199,7 +287,8 @@ export function App() {
     const loadPromise = Promise.resolve().then(async () => {
       const loaded = await loadRoomDataFromSupabase(setDataLoadProgress);
       if (loaded) {
-        setRooms(loaded.rooms);
+        const floorplanResult = await applyRoomFloorplanImages(loaded.rooms);
+        setRooms(floorplanResult.rooms);
         setCampusesData(loaded.campuses);
         setBuildingsData(loaded.buildings);
         setRoomPatterns(loaded.patterns.length ? loaded.patterns : initialPatterns);
@@ -208,7 +297,7 @@ export function App() {
         setSelectedRoomId((currentRoomId) =>
           loaded.rooms.length && !loaded.rooms.some((room) => room.id === currentRoomId) ? loaded.rooms[0].id : currentRoomId,
         );
-        setDataMessage(`Loaded ${loaded.rooms.length} room(s) from Supabase.`);
+        setDataMessage(`Loaded ${loaded.rooms.length} room(s) from Supabase. Matched ${floorplanResult.matched} floorplan image(s).`);
       }
     });
 
@@ -902,6 +991,12 @@ function RoomDetail({ room, attributes }: { room: Room; attributes: AttributeDef
         </div>
 
         <aside className="space-y-6">
+          <div className="panel rounded-lg">
+            <SectionTitle icon={ImageIcon} title="Floorplan" />
+            <div className="p-4">
+              <FloorplanPreview imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} />
+            </div>
+          </div>
           <div className="panel rounded-lg p-4">
             <h3 className="font-bold text-slate-950">Capabilities</h3>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -1069,7 +1164,7 @@ function Admin({
     });
   };
 
-  const saveRoom = () => {
+  const saveRoom = async () => {
     const parsed = roomSchema.safeParse(draft);
     if (!parsed.success) {
       alert('Please complete room code, name, campus, building, capacity, owner, and pattern.');
@@ -1085,6 +1180,19 @@ function Admin({
       },
       qualityFlags: draft.qualityFlags.filter((flag) => flag !== 'Unsaved admin edits'),
     };
+
+    if (isSupabaseConfigured && supabase) {
+      const { error } = await supabase
+        .from('rooms')
+        .update({ floorplan_image_url: savedDraft.floorplanImageUrl ?? null })
+        .eq('id', savedDraft.id);
+
+      if (error) {
+        alert(`Room draft was not saved because the floorplan image could not be stored: ${error.message}`);
+        return;
+      }
+    }
+
     setRooms(rooms.map((item) => (item.id === draft.id ? savedDraft : item)));
   };
 
@@ -1119,6 +1227,26 @@ function Admin({
 
       return { ...current, attributes: nextAttributes, qualityFlags: nextQualityFlags };
     });
+  };
+
+  const updateDraftFloorplan = (floorplanImageUrl?: string) => {
+    setDraft((current) => ({
+      ...current,
+      floorplanImageUrl,
+      qualityFlags: [...new Set([...current.qualityFlags, 'Unsaved admin edits'])],
+    }));
+  };
+
+  const handleFloorplanUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    try {
+      updateDraftFloorplan(await readImageFileAsDataUrl(file));
+    } catch (error) {
+      alert(error instanceof Error ? error.message : 'Could not upload the floorplan image.');
+    }
   };
 
   return (
@@ -1225,6 +1353,27 @@ function Admin({
               <Toggle label="Student accessible" checked={draft.isStudentAccessible} onChange={(value) => setDraft({ ...draft, isStudentAccessible: value })} />
               <Toggle label="Staff only" checked={draft.isStaffOnly} onChange={(value) => setDraft({ ...draft, isStaffOnly: value })} />
               <Toggle label="Archived" checked={draft.isArchived} onChange={(value) => setDraft({ ...draft, isArchived: value })} icon={Archive} />
+            </div>
+            <div className="mt-4 rounded-md border border-slate-200 p-3">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="label">Floorplan image</p>
+                  <p className="mt-1 text-sm text-slate-600">Upload a small PNG, JPG, or WebP for this room.</p>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <label className="btn-secondary cursor-pointer">
+                    <Upload size={16} />
+                    Upload
+                    <input className="sr-only" type="file" accept="image/png,image/jpeg,image/webp,image/gif" onChange={handleFloorplanUpload} />
+                  </label>
+                  {draft.floorplanImageUrl && (
+                    <button className="btn-secondary" onClick={() => updateDraftFloorplan(undefined)}>
+                      <Trash2 size={16} /> Remove
+                    </button>
+                  )}
+                </div>
+              </div>
+              <FloorplanPreview imageUrl={draft.floorplanImageUrl} roomName={roomDisplayName(draft)} className="mt-3" />
             </div>
           </div>
 
@@ -2081,6 +2230,22 @@ function Patterns({
         </div>
       </section>
     </>
+  );
+}
+
+function FloorplanPreview({ imageUrl, roomName, className }: { imageUrl?: string; roomName: string; className?: string }) {
+  if (!imageUrl) {
+    return (
+      <div className={cn('flex min-h-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500', className)}>
+        No floorplan uploaded.
+      </div>
+    );
+  }
+
+  return (
+    <a href={imageUrl} target="_blank" rel="noreferrer" className={cn('block overflow-hidden rounded-md border border-slate-200 bg-slate-50', className)}>
+      <img src={imageUrl} alt={`Floorplan for ${roomName}`} className="max-h-72 w-full object-contain" />
+    </a>
   );
 }
 

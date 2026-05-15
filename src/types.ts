@@ -98,6 +98,7 @@ export interface Room {
   isArchived: boolean;
   physicalNotes: string;
   bookingNotes: string;
+  floorplanImageUrl?: string;
   capabilities: string[];
   attributes: Record<string, string | number | boolean | string[]>;
   downstreamSystems: string[];

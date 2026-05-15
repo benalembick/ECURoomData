@@ -1,0 +1,1817 @@
+﻿[
+    {
+        "room":  "1N.600",
+        "name":  "SAL SPACE (36)",
+        "filename":  "CC.1N.600 - SAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1N.601",
+        "name":  "PRINTMAKING STUDIO",
+        "filename":  "CC.1N.601 - PRINTMAKING STUDIO.jpg"
+    },
+    {
+        "room":  "1N.601A",
+        "name":  "SILKSCREEN STUDIO",
+        "filename":  "CC.1N.601A - SILKSCREEN STUDIO.jpg"
+    },
+    {
+        "room":  "1N.601B",
+        "name":  "OUTDOOR DRYING SPACE",
+        "filename":  "CC.1N.601B - OUTDOOR DRYING SPACE.jpg"
+    },
+    {
+        "room":  "1N.601C",
+        "name":  "ENTRY WETMAKER",
+        "filename":  "CC.1N.601C - ENTRY WETMAKER.jpg"
+    },
+    {
+        "room":  "1N.601D",
+        "name":  "ACID",
+        "filename":  "CC.1N.601D - ACID.jpg"
+    },
+    {
+        "room":  "1N.601E",
+        "name":  "HIGH PRESSURE SPRAY",
+        "filename":  "CC.1N.601E - HIGH PRESSURE SPRAY.jpg"
+    },
+    {
+        "room":  "1N.601F",
+        "name":  "UV LAMP UV",
+        "filename":  "CC.1N.601F - UV LAMP UV.jpg"
+    },
+    {
+        "room":  "1N.601G",
+        "name":  "UV LAMP",
+        "filename":  "CC.1N.601G - UV LAMP.jpg"
+    },
+    {
+        "room":  "1N.602",
+        "name":  "TEAL SPACE (36)",
+        "filename":  "CC.1N.602 - TEAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1N.603",
+        "name":  "COMPUTER LAB (48)",
+        "filename":  "CC.1N.603 - COMPUTER LAB (48).jpg"
+    },
+    {
+        "room":  "1N.604",
+        "name":  "COMPUTER LAB (48)",
+        "filename":  "CC.1N.604 - COMPUTER LAB (48).jpg"
+    },
+    {
+        "room":  "1N.607",
+        "name":  "CASE STUDY",
+        "filename":  "CC.1N.607 - CASE STUDY.jpg"
+    },
+    {
+        "room":  "1N.620",
+        "name":  "BROADCAST STUDIO",
+        "filename":  "CC.1N.620 - BROADCAST STUDIO.jpg"
+    },
+    {
+        "room":  "1N.621",
+        "name":  "CONTROL ROOM",
+        "filename":  "CC.1N.621 - CONTROL ROOM.jpg"
+    },
+    {
+        "room":  "1N.621A",
+        "name":  "AUDIO BOOTH",
+        "filename":  "CC.1N.621A - AUDIO BOOTH.jpg"
+    },
+    {
+        "room":  "1N.621B",
+        "name":  "MASTER EQUIPMENT",
+        "filename":  "CC.1N.621B - MASTER EQUIPMENT.jpg"
+    },
+    {
+        "room":  "1N.621C",
+        "name":  "AIRLOCK",
+        "filename":  "CC.1N.621C - AIRLOCK.jpg"
+    },
+    {
+        "room":  "1N.622",
+        "name":  "PODCAST STUDIO 1",
+        "filename":  "CC.1N.622 - PODCAST STUDIO 1.jpg"
+    },
+    {
+        "room":  "1N.622A",
+        "name":  "PODCAST STUDIO AIR LOCK",
+        "filename":  "CC.1N.622A - PODCAST STUDIO AIR LOCK.jpg"
+    },
+    {
+        "room":  "1N.623",
+        "name":  "PODCAST STUDIO 2",
+        "filename":  "CC.1N.623 - PODCAST STUDIO 2.jpg"
+    },
+    {
+        "room":  "1N.624",
+        "name":  "NEWSROOM",
+        "filename":  "CC.1N.624 - NEWSROOM.jpg"
+    },
+    {
+        "room":  "1N.624A",
+        "name":  "PRODUCERS OFFICE 1",
+        "filename":  "CC.1N.624A - PRODUCERS OFFICE 1.jpg"
+    },
+    {
+        "room":  "1N.624B",
+        "name":  "NEWS READING BOOTH 1",
+        "filename":  "CC.1N.624B - NEWS READING BOOTH 1.jpg"
+    },
+    {
+        "room":  "1N.624C",
+        "name":  "VISUAL RADIO STUDIO 1",
+        "filename":  "CC.1N.624C - VISUAL RADIO STUDIO 1.jpg"
+    },
+    {
+        "room":  "1N.624D",
+        "name":  "PRODUCERS OFFICE 2",
+        "filename":  "CC.1N.624D - PRODUCERS OFFICE 2.jpg"
+    },
+    {
+        "room":  "1N.624E",
+        "name":  "NEWS READING BOOTH 2",
+        "filename":  "CC.1N.624E - NEWS READING BOOTH 2.jpg"
+    },
+    {
+        "room":  "1N.624F",
+        "name":  "VISUAL RADIO STUDIO 2",
+        "filename":  "CC.1N.624F - VISUAL RADIO STUDIO 2.jpg"
+    },
+    {
+        "room":  "1N.627",
+        "name":  "TECH HELPDESK - MEDIA CENTRE",
+        "filename":  "CC.1N.627 - TECH HELPDESK - MEDIA CENTRE.jpg"
+    },
+    {
+        "room":  "1N.628",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.628 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.629",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.629 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.630",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.630 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.631",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.631 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.632",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.632 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.633",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.633 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.634",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.634 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.635",
+        "name":  "MEDIA PRODUCTION SUITE",
+        "filename":  "CC.1N.635 - MEDIA PRODUCTION SUITE.jpg"
+    },
+    {
+        "room":  "1N.636",
+        "name":  "TEAL SPACE (72)",
+        "filename":  "CC.1N.636 - TEAL SPACE (72).jpg"
+    },
+    {
+        "room":  "1N.6A01",
+        "name":  "TOILET - UAT",
+        "filename":  "CC.1N.6A01 - TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1N.6A02",
+        "name":  "UAT TOILET - ALL GENDER",
+        "filename":  "CC.1N.6A02 - UAT TOILET - ALL GENDER.jpg"
+    },
+    {
+        "room":  "1N.6A03",
+        "name":  "MALE CLEANERS",
+        "filename":  "CC.1N.6A03 - MALE CLEANERS.jpg"
+    },
+    {
+        "room":  "1N.6A04",
+        "name":  "TOILET - FEMALE",
+        "filename":  "CC.1N.6A04 - TOILET - FEMALE.jpg"
+    },
+    {
+        "room":  "1N.6A05",
+        "name":  "TOILET - MALE",
+        "filename":  "CC.1N.6A05 - TOILET - MALE.jpg"
+    },
+    {
+        "room":  "1N.6A06",
+        "name":  "TOILET - UAT [EL-07] CIRCULATION TOILET - ALL GENDER",
+        "filename":  "CC.1N.6A06 - TOILET - UAT [EL-07] CIRCULATION TOILET - ALL GENDER.jpg"
+    },
+    {
+        "room":  "1N.6A07",
+        "name":  "TOILET - ALL GENDER",
+        "filename":  "CC.1N.6A07 - TOILET - ALL GENDER.jpg"
+    },
+    {
+        "room":  "1N.6A08",
+        "name":  "FEMALE RISER - TOILET",
+        "filename":  "CC.1N.6A08 - FEMALE RISER - TOILET.jpg"
+    },
+    {
+        "room":  "1N.6A09",
+        "name":  "MALE - TOILET",
+        "filename":  "CC.1N.6A09 - MALE - TOILET.jpg"
+    },
+    {
+        "room":  "1N.6A10",
+        "name":  "CLEANERS",
+        "filename":  "CC.1N.6A10 - CLEANERS.jpg"
+    },
+    {
+        "room":  "1N.6B01",
+        "name":  "STORE SHARED",
+        "filename":  "CC.1N.6B01 - STORE SHARED.jpg"
+    },
+    {
+        "room":  "1N.6B02",
+        "name":  "STORE SHARED",
+        "filename":  "CC.1N.6B02 - STORE SHARED.jpg"
+    },
+    {
+        "room":  "1N.6B03",
+        "name":  "STORE - PROPS",
+        "filename":  "CC.1N.6B03 - STORE - PROPS.jpg"
+    },
+    {
+        "room":  "1N.6C00",
+        "name":  "[EL-02] CIRCULATION",
+        "filename":  "CC.1N.6C00 - [EL-02] CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C01",
+        "name":  "CREATIVE NORTH LANEWAY",
+        "filename":  "CC.1N.6C01 - CREATIVE NORTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1N.6C02",
+        "name":  "CREATIVE NORTH LANEWAY",
+        "filename":  "CC.1N.6C02 - CREATIVE NORTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1N.6C03",
+        "name":  "CIRCULATION TOILET - GENDER",
+        "filename":  "CC.1N.6C03 - CIRCULATION TOILET - GENDER.jpg"
+    },
+    {
+        "room":  "1N.6C04",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C04 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C05",
+        "name":  "SOCIAL CENTRAL ATRIUM",
+        "filename":  "CC.1N.6C05 - SOCIAL CENTRAL ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C06",
+        "name":  "SOCIAL CENTRAL ATRIUM",
+        "filename":  "CC.1N.6C06 - SOCIAL CENTRAL ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C07",
+        "name":  "CIRCULATION CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.6C07 - CIRCULATION CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C08",
+        "name":  "CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.6C08 - CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C09",
+        "name":  "CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.6C09 - CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C10",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C10 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C11",
+        "name":  "SOCIAL CENTRAL ATRIUM",
+        "filename":  "CC.1N.6C11 - SOCIAL CENTRAL ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C12",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C12 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C13",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C13 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C14",
+        "name":  "CLEANERS - UAT CIRCULATION ALL GENDER",
+        "filename":  "CC.1N.6C14 - CLEANERS - UAT CIRCULATION ALL GENDER.jpg"
+    },
+    {
+        "room":  "1N.6C15",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C15 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C16",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C16 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C17",
+        "name":  "SOCIAL WEST ATRIUM",
+        "filename":  "CC.1N.6C17 - SOCIAL WEST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6C18",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.6C18 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.6C19",
+        "name":  "SOCIAL WEST ATRIUM",
+        "filename":  "CC.1N.6C19 - SOCIAL WEST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.6E04",
+        "name":  "ESCALATOR",
+        "filename":  "CC.1N.6E04 - ESCALATOR.jpg"
+    },
+    {
+        "room":  "1N.6E05",
+        "name":  "ESCALATOR",
+        "filename":  "CC.1N.6E05 - ESCALATOR.jpg"
+    },
+    {
+        "room":  "1N.6L01",
+        "name":  "LIFT CAR [EL-01]",
+        "filename":  "CC.1N.6L01 - LIFT CAR [EL-01].jpg"
+    },
+    {
+        "room":  "1N.6L02",
+        "name":  "LIFT CAR [EL-02]",
+        "filename":  "CC.1N.6L02 - LIFT CAR [EL-02].jpg"
+    },
+    {
+        "room":  "1N.6L03",
+        "name":  "LIFT CAR [EL-03]",
+        "filename":  "CC.1N.6L03 - LIFT CAR [EL-03].jpg"
+    },
+    {
+        "room":  "1N.6L04",
+        "name":  "LIFT CAR [EL-04]",
+        "filename":  "CC.1N.6L04 - LIFT CAR [EL-04].jpg"
+    },
+    {
+        "room":  "1N.6L07",
+        "name":  "GOODS LIFT [EL-07]",
+        "filename":  "CC.1N.6L07 - GOODS LIFT [EL-07].jpg"
+    },
+    {
+        "room":  "1N.6P01",
+        "name":  "PLANT",
+        "filename":  "CC.1N.6P01 - PLANT.jpg"
+    },
+    {
+        "room":  "1N.6RI01",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.6RI01 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.6RI02",
+        "name":  "RISER",
+        "filename":  "CC.1N.6RI02 - RISER.jpg"
+    },
+    {
+        "room":  "1N.6RI03",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.6RI03 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.6RI04",
+        "name":  "ST. RF.",
+        "filename":  "CC.1N.6RI04 - ST. RF..jpg"
+    },
+    {
+        "room":  "1N.6RI05",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.6RI05 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.6RI06",
+        "name":  "RISER COMMS DB",
+        "filename":  "CC.1N.6RI06 - RISER COMMS DB.jpg"
+    },
+    {
+        "room":  "1N.6RI07",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.6RI07 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.6RI08",
+        "name":  "Room",
+        "filename":  "CC.1N.6RI08 - Room.jpg"
+    },
+    {
+        "room":  "1N.6RI09",
+        "name":  "PRESS STAIR",
+        "filename":  "CC.1N.6RI09 - PRESS STAIR.jpg"
+    },
+    {
+        "room":  "1N.6RI10",
+        "name":  "RISER",
+        "filename":  "CC.1N.6RI10 - RISER.jpg"
+    },
+    {
+        "room":  "1N.6RI11",
+        "name":  "RISER",
+        "filename":  "CC.1N.6RI11 - RISER.jpg"
+    },
+    {
+        "room":  "1N.6RI12",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.6RI12 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.6RI13",
+        "name":  "RISER",
+        "filename":  "CC.1N.6RI13 - RISER.jpg"
+    },
+    {
+        "room":  "1N.6RI14",
+        "name":  "Room",
+        "filename":  "CC.1N.6RI14 - Room.jpg"
+    },
+    {
+        "room":  "1N.6S01",
+        "name":  "DB",
+        "filename":  "CC.1N.6S01 - DB.jpg"
+    },
+    {
+        "room":  "1N.6S02",
+        "name":  "COMMS",
+        "filename":  "CC.1N.6S02 - COMMS.jpg"
+    },
+    {
+        "room":  "1N.6S03",
+        "name":  "PODCAST SERVICES FH",
+        "filename":  "CC.1N.6S03 - PODCAST SERVICES FH.jpg"
+    },
+    {
+        "room":  "1N.6S04",
+        "name":  "COMMS",
+        "filename":  "CC.1N.6S04 - COMMS.jpg"
+    },
+    {
+        "room":  "1N.6S05",
+        "name":  "FH",
+        "filename":  "CC.1N.6S05 - FH.jpg"
+    },
+    {
+        "room":  "1N.6S07",
+        "name":  "ELECTRICAL MSB",
+        "filename":  "CC.1N.6S07 - ELECTRICAL MSB.jpg"
+    },
+    {
+        "room":  "1N.6S08",
+        "name":  "ELECTRICAL UPS",
+        "filename":  "CC.1N.6S08 - ELECTRICAL UPS.jpg"
+    },
+    {
+        "room":  "1N.6S09",
+        "name":  "SMOKE EXHAUST FAN",
+        "filename":  "CC.1N.6S09 - SMOKE EXHAUST FAN.jpg"
+    },
+    {
+        "room":  "1N.6ST01",
+        "name":  "STAIR 01",
+        "filename":  "CC.1N.6ST01 - STAIR 01.jpg"
+    },
+    {
+        "room":  "1N.6ST03",
+        "name":  "STAIR 03",
+        "filename":  "CC.1N.6ST03 - STAIR 03.jpg"
+    },
+    {
+        "room":  "1N.6ST04",
+        "name":  "STAIR 04",
+        "filename":  "CC.1N.6ST04 - STAIR 04.jpg"
+    },
+    {
+        "room":  "1N.6ST05",
+        "name":  "STAIR 05",
+        "filename":  "CC.1N.6ST05 - STAIR 05.jpg"
+    },
+    {
+        "room":  "1N.6ST26",
+        "name":  "STAIR 26",
+        "filename":  "CC.1N.6ST26 - STAIR 26.jpg"
+    },
+    {
+        "room":  "1N.6ST30",
+        "name":  "STAIR 30",
+        "filename":  "CC.1N.6ST30 - STAIR 30.jpg"
+    },
+    {
+        "room":  "1N.6V00",
+        "name":  "VOID",
+        "filename":  "CC.1N.6V00 - VOID.jpg"
+    },
+    {
+        "room":  "1N.6V01",
+        "name":  "VOID",
+        "filename":  "CC.1N.6V01 - VOID.jpg"
+    },
+    {
+        "room":  "1N.6V02",
+        "name":  "VOID",
+        "filename":  "CC.1N.6V02 - VOID.jpg"
+    },
+    {
+        "room":  "1N.6V03",
+        "name":  "VOID",
+        "filename":  "CC.1N.6V03 - VOID.jpg"
+    },
+    {
+        "room":  "1N.700",
+        "name":  "WHITE BOX STUDIO",
+        "filename":  "CC.1N.700 - WHITE BOX STUDIO.jpg"
+    },
+    {
+        "room":  "1N.700A",
+        "name":  "PAINTING BALCONY",
+        "filename":  "CC.1N.700A - PAINTING BALCONY.jpg"
+    },
+    {
+        "room":  "1N.701",
+        "name":  "MAC LAB (36)",
+        "filename":  "CC.1N.701 - MAC LAB (36).jpg"
+    },
+    {
+        "room":  "1N.702",
+        "name":  "PAINTING \u0026 DRAWING STUDIO",
+        "filename":  "CC.1N.702 - PAINTING \u0026 DRAWING STUDIO.jpg"
+    },
+    {
+        "room":  "1N.703",
+        "name":  "DESIGN STUDIO",
+        "filename":  "CC.1N.703 - DESIGN STUDIO.jpg"
+    },
+    {
+        "room":  "1N.704",
+        "name":  "DRY MAKER",
+        "filename":  "CC.1N.704 - DRY MAKER.jpg"
+    },
+    {
+        "room":  "1N.705",
+        "name":  "WET MAKER",
+        "filename":  "CC.1N.705 - WET MAKER.jpg"
+    },
+    {
+        "room":  "1N.7A01",
+        "name":  "TOILET - FEMALE",
+        "filename":  "CC.1N.7A01 - TOILET - FEMALE.jpg"
+    },
+    {
+        "room":  "1N.7A02",
+        "name":  "TOILET - ALL GENDER",
+        "filename":  "CC.1N.7A02 - TOILET - ALL GENDER.jpg"
+    },
+    {
+        "room":  "1N.7A03",
+        "name":  "TOILET - UAT",
+        "filename":  "CC.1N.7A03 - TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1N.7A04",
+        "name":  "TOILET - MALE",
+        "filename":  "CC.1N.7A04 - TOILET - MALE.jpg"
+    },
+    {
+        "room":  "1N.7B01",
+        "name":  "VA\u0026D STORE",
+        "filename":  "CC.1N.7B01 - VA\u0026D STORE.jpg"
+    },
+    {
+        "room":  "1N.7B02",
+        "name":  "VA\u0026D STORE CIRCULATION",
+        "filename":  "CC.1N.7B02 - VA\u0026D STORE CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.7B03",
+        "name":  "STORE - SHARED VA \u0026 DESIGN",
+        "filename":  "CC.1N.7B03 - STORE - SHARED VA \u0026 DESIGN.jpg"
+    },
+    {
+        "room":  "1N.7C00",
+        "name":  "CREATIVE NORTH CIRCULATION LANEWAY [EL-01]",
+        "filename":  "CC.1N.7C00 - CREATIVE NORTH CIRCULATION LANEWAY [EL-01].jpg"
+    },
+    {
+        "room":  "1N.7C01",
+        "name":  "CREATIVE NORTH CIRCULATION LANEWAY",
+        "filename":  "CC.1N.7C01 - CREATIVE NORTH CIRCULATION LANEWAY.jpg"
+    },
+    {
+        "room":  "1N.7C02",
+        "name":  "LOBBY TOILET - - MALE",
+        "filename":  "CC.1N.7C02 - LOBBY TOILET - - MALE.jpg"
+    },
+    {
+        "room":  "1N.7C03",
+        "name":  "CREATIVE NORTH LANEWAY STAIR",
+        "filename":  "CC.1N.7C03 - CREATIVE NORTH LANEWAY STAIR.jpg"
+    },
+    {
+        "room":  "1N.7C04",
+        "name":  "CIRCULATION (2)",
+        "filename":  "CC.1N.7C04 - CIRCULATION (2).jpg"
+    },
+    {
+        "room":  "1N.7C04",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.7C04 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.7C05",
+        "name":  "SOCIAL CENTRAL ATRIUM",
+        "filename":  "CC.1N.7C05 - SOCIAL CENTRAL ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.7C06",
+        "name":  "RISER CIRCULATION CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.7C06 - RISER CIRCULATION CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.7C07",
+        "name":  "CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.7C07 - CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.7C08",
+        "name":  "CREATIVE EAST ATRIUM",
+        "filename":  "CC.1N.7C08 - CREATIVE EAST ATRIUM.jpg"
+    },
+    {
+        "room":  "1N.7C09",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.7C09 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.7C10",
+        "name":  "SOCIAL VOID CENTRAL LANEWAY",
+        "filename":  "CC.1N.7C10 - SOCIAL VOID CENTRAL LANEWAY.jpg"
+    },
+    {
+        "room":  "1N.7C11",
+        "name":  "SOCIAL CENTRAL LANEWAY",
+        "filename":  "CC.1N.7C11 - SOCIAL CENTRAL LANEWAY.jpg"
+    },
+    {
+        "room":  "1N.7C12",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1N.7C12 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.7C13",
+        "name":  "COMMS DB CIRCULATION GOODS LIFT [EL-07] STAIR PRESS",
+        "filename":  "CC.1N.7C13 - COMMS DB CIRCULATION GOODS LIFT [EL-07] STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.7E04",
+        "name":  "ESCALATOR",
+        "filename":  "CC.1N.7E04 - ESCALATOR.jpg"
+    },
+    {
+        "room":  "1N.7E05",
+        "name":  "ESCALATOR",
+        "filename":  "CC.1N.7E05 - ESCALATOR.jpg"
+    },
+    {
+        "room":  "1N.7L01",
+        "name":  "LIFT CAR [EL-01]",
+        "filename":  "CC.1N.7L01 - LIFT CAR [EL-01].jpg"
+    },
+    {
+        "room":  "1N.7L02",
+        "name":  "LIFT CAR [EL-02]",
+        "filename":  "CC.1N.7L02 - LIFT CAR [EL-02].jpg"
+    },
+    {
+        "room":  "1N.7L03",
+        "name":  "LIFT CAR [EL-03]",
+        "filename":  "CC.1N.7L03 - LIFT CAR [EL-03].jpg"
+    },
+    {
+        "room":  "1N.7L04",
+        "name":  "LIFT CAR [EL-04]",
+        "filename":  "CC.1N.7L04 - LIFT CAR [EL-04].jpg"
+    },
+    {
+        "room":  "1N.7L07",
+        "name":  "GOODS LIFT [EL-07]",
+        "filename":  "CC.1N.7L07 - GOODS LIFT [EL-07].jpg"
+    },
+    {
+        "room":  "1N.7P01",
+        "name":  "AHU PLANT",
+        "filename":  "CC.1N.7P01 - AHU PLANT.jpg"
+    },
+    {
+        "room":  "1N.7P02",
+        "name":  "AHU PLANT",
+        "filename":  "CC.1N.7P02 - AHU PLANT.jpg"
+    },
+    {
+        "room":  "1N.7P03",
+        "name":  "STAIR PRESS PLANT",
+        "filename":  "CC.1N.7P03 - STAIR PRESS PLANT.jpg"
+    },
+    {
+        "room":  "1N.7RI01",
+        "name":  "RISER CIRCULATION",
+        "filename":  "CC.1N.7RI01 - RISER CIRCULATION.jpg"
+    },
+    {
+        "room":  "1N.7RI02",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.7RI02 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.7RI03",
+        "name":  "RISER",
+        "filename":  "CC.1N.7RI03 - RISER.jpg"
+    },
+    {
+        "room":  "1N.7RI04",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.7RI04 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.7RI05",
+        "name":  "RISER",
+        "filename":  "CC.1N.7RI05 - RISER.jpg"
+    },
+    {
+        "room":  "1N.7RI06",
+        "name":  "PRESS STAIR",
+        "filename":  "CC.1N.7RI06 - PRESS STAIR.jpg"
+    },
+    {
+        "room":  "1N.7RI07",
+        "name":  "RISER",
+        "filename":  "CC.1N.7RI07 - RISER.jpg"
+    },
+    {
+        "room":  "1N.7RI08",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1N.7RI08 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1N.7RI09",
+        "name":  "RLF STAIR",
+        "filename":  "CC.1N.7RI09 - RLF STAIR.jpg"
+    },
+    {
+        "room":  "1N.7S01",
+        "name":  "DB",
+        "filename":  "CC.1N.7S01 - DB.jpg"
+    },
+    {
+        "room":  "1N.7S02",
+        "name":  "COMMS",
+        "filename":  "CC.1N.7S02 - COMMS.jpg"
+    },
+    {
+        "room":  "1N.7S04",
+        "name":  "PLANT - RISER ACCESS",
+        "filename":  "CC.1N.7S04 - PLANT - RISER ACCESS.jpg"
+    },
+    {
+        "room":  "1N.7S05",
+        "name":  "STAIR FAN - PRESR",
+        "filename":  "CC.1N.7S05 - STAIR FAN - PRESR.jpg"
+    },
+    {
+        "room":  "1N.7S06",
+        "name":  "DUST COLLECTOR FAN",
+        "filename":  "CC.1N.7S06 - DUST COLLECTOR FAN.jpg"
+    },
+    {
+        "room":  "1N.7S07",
+        "name":  "FH",
+        "filename":  "CC.1N.7S07 - FH.jpg"
+    },
+    {
+        "room":  "1N.7ST01",
+        "name":  "STAIR 01",
+        "filename":  "CC.1N.7ST01 - STAIR 01.jpg"
+    },
+    {
+        "room":  "1N.7ST04",
+        "name":  "STAIR 04",
+        "filename":  "CC.1N.7ST04 - STAIR 04.jpg"
+    },
+    {
+        "room":  "1N.7ST05",
+        "name":  "STAIR 05",
+        "filename":  "CC.1N.7ST05 - STAIR 05.jpg"
+    },
+    {
+        "room":  "1N.7ST30",
+        "name":  "STAIR 30",
+        "filename":  "CC.1N.7ST30 - STAIR 30.jpg"
+    },
+    {
+        "room":  "1N.7ST35",
+        "name":  "35 STAIR",
+        "filename":  "CC.1N.7ST35 - 35 STAIR.jpg"
+    },
+    {
+        "room":  "1N.7ST36",
+        "name":  "STAIR 36",
+        "filename":  "CC.1N.7ST36 - STAIR 36.jpg"
+    },
+    {
+        "room":  "1N.7ST37",
+        "name":  "STAIR 37",
+        "filename":  "CC.1N.7ST37 - STAIR 37.jpg"
+    },
+    {
+        "room":  "1N.7V00",
+        "name":  "VOID",
+        "filename":  "CC.1N.7V00 - VOID.jpg"
+    },
+    {
+        "room":  "1N.7V01",
+        "name":  "VOID",
+        "filename":  "CC.1N.7V01 - VOID.jpg"
+    },
+    {
+        "room":  "1N.7V02",
+        "name":  "VOID",
+        "filename":  "CC.1N.7V02 - VOID.jpg"
+    },
+    {
+        "room":  "1S.605",
+        "name":  "TEAL SPACE (36)",
+        "filename":  "CC.1S.605 - TEAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1S.606",
+        "name":  "SAL SPACE (36)",
+        "filename":  "CC.1S.606 - SAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1S.608",
+        "name":  "TEAL SPACE (36)",
+        "filename":  "CC.1S.608 - TEAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1S.609",
+        "name":  "SAL SPACE (36)",
+        "filename":  "CC.1S.609 - SAL SPACE (36).jpg"
+    },
+    {
+        "room":  "1S.610",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.610 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.611",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.611 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.612",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.612 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.613",
+        "name":  "TEAL SPACE (72) NON-TIMETABLED",
+        "filename":  "CC.1S.613 - TEAL SPACE (72) NON-TIMETABLED.jpg"
+    },
+    {
+        "room":  "1S.613A",
+        "name":  "TERRACE",
+        "filename":  "CC.1S.613A - TERRACE.jpg"
+    },
+    {
+        "room":  "1S.614",
+        "name":  "SAL SPACE (48)",
+        "filename":  "CC.1S.614 - SAL SPACE (48).jpg"
+    },
+    {
+        "room":  "1S.615",
+        "name":  "TEAL SPACE (48)",
+        "filename":  "CC.1S.615 - TEAL SPACE (48).jpg"
+    },
+    {
+        "room":  "1S.640",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.640 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.650",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.650 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.651",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.651 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.652",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.652 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.653",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.653 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.654",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.654 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.655",
+        "name":  "NEIGHBOURHOOD 1",
+        "filename":  "CC.1S.655 - NEIGHBOURHOOD 1.jpg"
+    },
+    {
+        "room":  "1S.655A",
+        "name":  "ACCESSIBLE FOCUS BOOTH [FORMER 1S.655L]",
+        "filename":  "CC.1S.655A - ACCESSIBLE FOCUS BOOTH [FORMER 1S.655L].jpg"
+    },
+    {
+        "room":  "1S.655B",
+        "name":  "FOCUS POD [FORMER 1S.655K]",
+        "filename":  "CC.1S.655B - FOCUS POD [FORMER 1S.655K].jpg"
+    },
+    {
+        "room":  "1S.655C",
+        "name":  "1S.655J] POD FOCUS [FORMER",
+        "filename":  "CC.1S.655C - 1S.655J] POD FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.655D",
+        "name":  "BOOTH 1S.655I] FOCUS [FORMER",
+        "filename":  "CC.1S.655D - BOOTH 1S.655I] FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.655E",
+        "name":  "FOCUS BOOTH [FORMER 1S.655M]",
+        "filename":  "CC.1S.655E - FOCUS BOOTH [FORMER 1S.655M].jpg"
+    },
+    {
+        "room":  "1S.655F",
+        "name":  "FOCUS POD [FORMER 1S.655N] POD 1S.655O] ACCESSIBLE ACCESSIBLE",
+        "filename":  "CC.1S.655F - FOCUS POD [FORMER 1S.655N] POD 1S.655O] ACCESSIBLE ACCESSIBLE.jpg"
+    },
+    {
+        "room":  "1S.655G",
+        "name":  "FOCUS POD [FORMER 1S.655O]",
+        "filename":  "CC.1S.655G - FOCUS POD [FORMER 1S.655O].jpg"
+    },
+    {
+        "room":  "1S.656",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.656 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.657",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.657 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.658",
+        "name":  "NEIGHBOURHOOD 2",
+        "filename":  "CC.1S.658 - NEIGHBOURHOOD 2.jpg"
+    },
+    {
+        "room":  "1S.658A",
+        "name":  "FOCUS POD [FORMER 1S.658U]",
+        "filename":  "CC.1S.658A - FOCUS POD [FORMER 1S.658U].jpg"
+    },
+    {
+        "room":  "1S.658B",
+        "name":  "[FORMER 1S.658W] [FORMER [FORMER 1S.658U] FOCUS POD [FORMER 1S.658V]",
+        "filename":  "CC.1S.658B - [FORMER 1S.658W] [FORMER [FORMER 1S.658U] FOCUS POD [FORMER 1S.658V].jpg"
+    },
+    {
+        "room":  "1S.658C",
+        "name":  "ACCESSIBLE FOCUS BOOTH [FORMER 1S.658W]",
+        "filename":  "CC.1S.658C - ACCESSIBLE FOCUS BOOTH [FORMER 1S.658W].jpg"
+    },
+    {
+        "room":  "1S.658D",
+        "name":  "ACCESSIBLE FOCUS BOOTH [FORMER 1S.658X]",
+        "filename":  "CC.1S.658D - ACCESSIBLE FOCUS BOOTH [FORMER 1S.658X].jpg"
+    },
+    {
+        "room":  "1S.658E",
+        "name":  "FOCUS POD [FORMER 1S.658Y]",
+        "filename":  "CC.1S.658E - FOCUS POD [FORMER 1S.658Y].jpg"
+    },
+    {
+        "room":  "1S.659",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.659 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.660",
+        "name":  "NEIGHBOURHOOD 3",
+        "filename":  "CC.1S.660 - NEIGHBOURHOOD 3.jpg"
+    },
+    {
+        "room":  "1S.660A",
+        "name":  "ACCESSIBLE FOCUS BOOTH [FORMER 1S.660V]",
+        "filename":  "CC.1S.660A - ACCESSIBLE FOCUS BOOTH [FORMER 1S.660V].jpg"
+    },
+    {
+        "room":  "1S.660B",
+        "name":  "FOCUS POD [FORMER 1S.660U]",
+        "filename":  "CC.1S.660B - FOCUS POD [FORMER 1S.660U].jpg"
+    },
+    {
+        "room":  "1S.660C",
+        "name":  "1S.660T] POD [FORMER FOCUS",
+        "filename":  "CC.1S.660C - 1S.660T] POD [FORMER FOCUS.jpg"
+    },
+    {
+        "room":  "1S.661",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.661 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.662",
+        "name":  "MEDIUM MEETING",
+        "filename":  "CC.1S.662 - MEDIUM MEETING.jpg"
+    },
+    {
+        "room":  "1S.663",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.663 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.664",
+        "name":  "NEIGHBOURHOOD 4",
+        "filename":  "CC.1S.664 - NEIGHBOURHOOD 4.jpg"
+    },
+    {
+        "room":  "1S.664A",
+        "name":  "FOCUS POD [FORMER 1S.664R]",
+        "filename":  "CC.1S.664A - FOCUS POD [FORMER 1S.664R].jpg"
+    },
+    {
+        "room":  "1S.664B",
+        "name":  "FOCUS POD [FORMER 1S.664Q]",
+        "filename":  "CC.1S.664B - FOCUS POD [FORMER 1S.664Q].jpg"
+    },
+    {
+        "room":  "1S.664C",
+        "name":  "FOCUS POD [FORMER 1S.664P]",
+        "filename":  "CC.1S.664C - FOCUS POD [FORMER 1S.664P].jpg"
+    },
+    {
+        "room":  "1S.664D",
+        "name":  "FOCUS BOOTH [FORMER 1S.664O]",
+        "filename":  "CC.1S.664D - FOCUS BOOTH [FORMER 1S.664O].jpg"
+    },
+    {
+        "room":  "1S.664E",
+        "name":  "1S.664N] POD FOCUS [FORMER",
+        "filename":  "CC.1S.664E - 1S.664N] POD FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.664F",
+        "name":  "FOCUS BOOTH [FORMER 1S.664M]",
+        "filename":  "CC.1S.664F - FOCUS BOOTH [FORMER 1S.664M].jpg"
+    },
+    {
+        "room":  "1S.6A01",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.6A01 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.6A02",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.6A02 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.6A03",
+        "name":  "CLEANERS",
+        "filename":  "CC.1S.6A03 - CLEANERS.jpg"
+    },
+    {
+        "room":  "1S.6A04",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.6A04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.6A05",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.6A05 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.6C00",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.6C00 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.6C01",
+        "name":  "STAFF-STUDENT INTERFACE RISER STAIR PRESS RISER",
+        "filename":  "CC.1S.6C01 - STAFF-STUDENT INTERFACE RISER STAIR PRESS RISER.jpg"
+    },
+    {
+        "room":  "1S.6C02",
+        "name":  "STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING",
+        "filename":  "CC.1S.6C02 - STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING.jpg"
+    },
+    {
+        "room":  "1S.6C03",
+        "name":  "KITCHENETTE \u0026 PRINT STATION STAFF GALLERY SMALL",
+        "filename":  "CC.1S.6C03 - KITCHENETTE \u0026 PRINT STATION STAFF GALLERY SMALL.jpg"
+    },
+    {
+        "room":  "1S.6C03A",
+        "name":  "KITCHENETTE \u0026 PRINT STATION",
+        "filename":  "CC.1S.6C03A - KITCHENETTE \u0026 PRINT STATION.jpg"
+    },
+    {
+        "room":  "1S.6C04",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.6C04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.6C05",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.6C05 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.6C06",
+        "name":  "SOCIAL BRIDGE LANEWAY",
+        "filename":  "CC.1S.6C06 - SOCIAL BRIDGE LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.6C07",
+        "name":  "SOCIAL BRIDGE LANEWAY",
+        "filename":  "CC.1S.6C07 - SOCIAL BRIDGE LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.6C08",
+        "name":  "FOCUSED SOUTH LANEWAY",
+        "filename":  "CC.1S.6C08 - FOCUSED SOUTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.6C09",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.6C09 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.6C10",
+        "name":  "COLLAB SOUTH LANEWAY CIRCULATION",
+        "filename":  "CC.1S.6C10 - COLLAB SOUTH LANEWAY CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.6C11",
+        "name":  "COLLAB SOUTH LANEWAY",
+        "filename":  "CC.1S.6C11 - COLLAB SOUTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.6C12",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.6C12 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.6L11",
+        "name":  "LIFT CAR [EL-11]",
+        "filename":  "CC.1S.6L11 - LIFT CAR [EL-11].jpg"
+    },
+    {
+        "room":  "1S.6L12",
+        "name":  "LIFT CAR [EL-12]",
+        "filename":  "CC.1S.6L12 - LIFT CAR [EL-12].jpg"
+    },
+    {
+        "room":  "1S.6L13",
+        "name":  "LIFT CAR [EL-13]",
+        "filename":  "CC.1S.6L13 - LIFT CAR [EL-13].jpg"
+    },
+    {
+        "room":  "1S.6L14",
+        "name":  "LIFT CAR [EL-14]",
+        "filename":  "CC.1S.6L14 - LIFT CAR [EL-14].jpg"
+    },
+    {
+        "room":  "1S.6L15",
+        "name":  "CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -",
+        "filename":  "CC.1S.6L15 - CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -.jpg"
+    },
+    {
+        "room":  "1S.6L16",
+        "name":  "LIFT CAR [EL-16]",
+        "filename":  "CC.1S.6L16 - LIFT CAR [EL-16].jpg"
+    },
+    {
+        "room":  "1S.6RI01",
+        "name":  "RISER",
+        "filename":  "CC.1S.6RI01 - RISER.jpg"
+    },
+    {
+        "room":  "1S.6RI02",
+        "name":  "PRESS STAIR",
+        "filename":  "CC.1S.6RI02 - PRESS STAIR.jpg"
+    },
+    {
+        "room":  "1S.6RI03",
+        "name":  "RISER",
+        "filename":  "CC.1S.6RI03 - RISER.jpg"
+    },
+    {
+        "room":  "1S.6RI04",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1S.6RI04 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1S.6RI05",
+        "name":  "RISER",
+        "filename":  "CC.1S.6RI05 - RISER.jpg"
+    },
+    {
+        "room":  "1S.6RI07",
+        "name":  "RISER",
+        "filename":  "CC.1S.6RI07 - RISER.jpg"
+    },
+    {
+        "room":  "1S.6RI08",
+        "name":  "BUSPORT EXHAUST RISER",
+        "filename":  "CC.1S.6RI08 - BUSPORT EXHAUST RISER.jpg"
+    },
+    {
+        "room":  "1S.6S01",
+        "name":  "STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS",
+        "filename":  "CC.1S.6S01 - STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS.jpg"
+    },
+    {
+        "room":  "1S.6S02",
+        "name":  "STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS",
+        "filename":  "CC.1S.6S02 - STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS.jpg"
+    },
+    {
+        "room":  "1S.6S03",
+        "name":  "SERVICES SERVICES SERVICES",
+        "filename":  "CC.1S.6S03 - SERVICES SERVICES SERVICES.jpg"
+    },
+    {
+        "room":  "1S.6S04",
+        "name":  "SERVICES SERVICES",
+        "filename":  "CC.1S.6S04 - SERVICES SERVICES.jpg"
+    },
+    {
+        "room":  "1S.6S05",
+        "name":  "FHR RISER LIFT CAR SERVICES",
+        "filename":  "CC.1S.6S05 - FHR RISER LIFT CAR SERVICES.jpg"
+    },
+    {
+        "room":  "1S.6S06",
+        "name":  "COMMS",
+        "filename":  "CC.1S.6S06 - COMMS.jpg"
+    },
+    {
+        "room":  "1S.6S07",
+        "name":  "DB",
+        "filename":  "CC.1S.6S07 - DB.jpg"
+    },
+    {
+        "room":  "1S.6S08",
+        "name":  "FHR",
+        "filename":  "CC.1S.6S08 - FHR.jpg"
+    },
+    {
+        "room":  "1S.6S09",
+        "name":  "FH",
+        "filename":  "CC.1S.6S09 - FH.jpg"
+    },
+    {
+        "room":  "1S.6ST06",
+        "name":  "STAIR 06",
+        "filename":  "CC.1S.6ST06 - STAIR 06.jpg"
+    },
+    {
+        "room":  "1S.6ST07",
+        "name":  "STAIR 07",
+        "filename":  "CC.1S.6ST07 - STAIR 07.jpg"
+    },
+    {
+        "room":  "1S.6ST32",
+        "name":  "STAIR 32",
+        "filename":  "CC.1S.6ST32 - STAIR 32.jpg"
+    },
+    {
+        "room":  "1S.6V00",
+        "name":  "VOID",
+        "filename":  "CC.1S.6V00 - VOID.jpg"
+    },
+    {
+        "room":  "1S.6V01",
+        "name":  "VOID",
+        "filename":  "CC.1S.6V01 - VOID.jpg"
+    },
+    {
+        "room":  "1S.706",
+        "name":  "PRINT PRODUCTION ROOM",
+        "filename":  "CC.1S.706 - PRINT PRODUCTION ROOM.jpg"
+    },
+    {
+        "room":  "1S.707",
+        "name":  "SAH PROJECT GALLERY",
+        "filename":  "CC.1S.707 - SAH PROJECT GALLERY.jpg"
+    },
+    {
+        "room":  "1S.710",
+        "name":  "COWORKING SPACE",
+        "filename":  "CC.1S.710 - COWORKING SPACE.jpg"
+    },
+    {
+        "room":  "1S.711",
+        "name":  "MOTION CAPTURE STUDIO \u0026 HAPTIC VR CREATION",
+        "filename":  "CC.1S.711 - MOTION CAPTURE STUDIO \u0026 HAPTIC VR CREATION.jpg"
+    },
+    {
+        "room":  "1S.711A",
+        "name":  "EQUIPMENT",
+        "filename":  "CC.1S.711A - EQUIPMENT.jpg"
+    },
+    {
+        "room":  "1S.711B",
+        "name":  "CHANGE RACK",
+        "filename":  "CC.1S.711B - CHANGE RACK.jpg"
+    },
+    {
+        "room":  "1S.711C",
+        "name":  "RACK",
+        "filename":  "CC.1S.711C - RACK.jpg"
+    },
+    {
+        "room":  "1S.712",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.712 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.713",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.713 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.714",
+        "name":  "PROJECT",
+        "filename":  "CC.1S.714 - PROJECT.jpg"
+    },
+    {
+        "room":  "1S.715",
+        "name":  "FUNCTION ROOM",
+        "filename":  "CC.1S.715 - FUNCTION ROOM.jpg"
+    },
+    {
+        "room":  "1S.715A",
+        "name":  "CATERING PREP",
+        "filename":  "CC.1S.715A - CATERING PREP.jpg"
+    },
+    {
+        "room":  "1S.715B",
+        "name":  "OUTDOOR TERRACE [FORMER 1S.715A]",
+        "filename":  "CC.1S.715B - OUTDOOR TERRACE [FORMER 1S.715A].jpg"
+    },
+    {
+        "room":  "1S.716",
+        "name":  "SAL SPACE (48)",
+        "filename":  "CC.1S.716 - SAL SPACE (48).jpg"
+    },
+    {
+        "room":  "1S.717",
+        "name":  "TEAL SPACE (48)",
+        "filename":  "CC.1S.717 - TEAL SPACE (48).jpg"
+    },
+    {
+        "room":  "1S.720",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.720 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.721",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.721 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.722",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.722 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.723",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.723 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.724",
+        "name":  "RECORDING STUDIO",
+        "filename":  "CC.1S.724 - RECORDING STUDIO.jpg"
+    },
+    {
+        "room":  "1S.725",
+        "name":  "STAFF COMMONS (KITCHEN + LOUNGE)",
+        "filename":  "CC.1S.725 - STAFF COMMONS (KITCHEN + LOUNGE).jpg"
+    },
+    {
+        "room":  "1S.725A",
+        "name":  "EXPERT LAB",
+        "filename":  "CC.1S.725A - EXPERT LAB.jpg"
+    },
+    {
+        "room":  "1S.725B",
+        "name":  "STAFF TERRACE",
+        "filename":  "CC.1S.725B - STAFF TERRACE.jpg"
+    },
+    {
+        "room":  "1S.730",
+        "name":  "BOARDROOM",
+        "filename":  "CC.1S.730 - BOARDROOM.jpg"
+    },
+    {
+        "room":  "1S.731",
+        "name":  "NEIGHBOURHOOD 1",
+        "filename":  "CC.1S.731 - NEIGHBOURHOOD 1.jpg"
+    },
+    {
+        "room":  "1S.731A",
+        "name":  "BOOTH 1S.731I] FOCUS [FORMER",
+        "filename":  "CC.1S.731A - BOOTH 1S.731I] FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.731B",
+        "name":  "FOCUS POD [FORMER 1S.731H]",
+        "filename":  "CC.1S.731B - FOCUS POD [FORMER 1S.731H].jpg"
+    },
+    {
+        "room":  "1S.731C",
+        "name":  "FOCUS POD [FORMER 1S.731G]",
+        "filename":  "CC.1S.731C - FOCUS POD [FORMER 1S.731G].jpg"
+    },
+    {
+        "room":  "1S.732",
+        "name":  "MEDIUM MEETING",
+        "filename":  "CC.1S.732 - MEDIUM MEETING.jpg"
+    },
+    {
+        "room":  "1S.733",
+        "name":  "SMALL MEETING",
+        "filename":  "CC.1S.733 - SMALL MEETING.jpg"
+    },
+    {
+        "room":  "1S.734",
+        "name":  "NEIGHBOURHOOD 1",
+        "filename":  "CC.1S.734 - NEIGHBOURHOOD 1.jpg"
+    },
+    {
+        "room":  "1S.734A",
+        "name":  "BOOTH 1S.734R] ACCESSIBLE FOCUS [FORMER",
+        "filename":  "CC.1S.734A - BOOTH 1S.734R] ACCESSIBLE FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.734B",
+        "name":  "BOOTH 1S.734Q] FOCUS [FORMER",
+        "filename":  "CC.1S.734B - BOOTH 1S.734Q] FOCUS [FORMER.jpg"
+    },
+    {
+        "room":  "1S.735",
+        "name":  "NEIGHBOURHOOD 1",
+        "filename":  "CC.1S.735 - NEIGHBOURHOOD 1.jpg"
+    },
+    {
+        "room":  "1S.735A",
+        "name":  "FOCUS POD",
+        "filename":  "CC.1S.735A - FOCUS POD.jpg"
+    },
+    {
+        "room":  "1S.735B",
+        "name":  "ACCESSIBLE FOCUS BOOTH",
+        "filename":  "CC.1S.735B - ACCESSIBLE FOCUS BOOTH.jpg"
+    },
+    {
+        "room":  "1S.735C",
+        "name":  "FOCUS POD",
+        "filename":  "CC.1S.735C - FOCUS POD.jpg"
+    },
+    {
+        "room":  "1S.735D",
+        "name":  "FOCUS BOOTH",
+        "filename":  "CC.1S.735D - FOCUS BOOTH.jpg"
+    },
+    {
+        "room":  "1S.736",
+        "name":  "PARENTING",
+        "filename":  "CC.1S.736 - PARENTING.jpg"
+    },
+    {
+        "room":  "1S.737",
+        "name":  "EXAMINATION DISTRIBUTION",
+        "filename":  "CC.1S.737 - EXAMINATION DISTRIBUTION.jpg"
+    },
+    {
+        "room":  "1S.738",
+        "name":  "STAFF COMMONS - LOUNGE",
+        "filename":  "CC.1S.738 - STAFF COMMONS - LOUNGE.jpg"
+    },
+    {
+        "room":  "1S.738A",
+        "name":  "FOCUS POD",
+        "filename":  "CC.1S.738A - FOCUS POD.jpg"
+    },
+    {
+        "room":  "1S.738B",
+        "name":  "ACCESSIBLE FOCUS BOOTH",
+        "filename":  "CC.1S.738B - ACCESSIBLE FOCUS BOOTH.jpg"
+    },
+    {
+        "room":  "1S.738C",
+        "name":  "FOCUS POD",
+        "filename":  "CC.1S.738C - FOCUS POD.jpg"
+    },
+    {
+        "room":  "1S.7A01",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.7A01 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7A02",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.7A02 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7A03",
+        "name":  "CLEANERS",
+        "filename":  "CC.1S.7A03 - CLEANERS.jpg"
+    },
+    {
+        "room":  "1S.7A04",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.7A04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7A05",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.7A05 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7B01",
+        "name":  "STORE - GENERAL",
+        "filename":  "CC.1S.7B01 - STORE - GENERAL.jpg"
+    },
+    {
+        "room":  "1S.7B02",
+        "name":  "STORE",
+        "filename":  "CC.1S.7B02 - STORE.jpg"
+    },
+    {
+        "room":  "1S.7C00",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.7C00 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.7C01",
+        "name":  "STAFF-STUDENT INTERFACE",
+        "filename":  "CC.1S.7C01 - STAFF-STUDENT INTERFACE.jpg"
+    },
+    {
+        "room":  "1S.7C02",
+        "name":  "STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING STAFF-STUDENT INTERFACE",
+        "filename":  "CC.1S.7C02 - STAFF-STUDENT SMALL SMALL SMALL INTERFACE MEETING MEETING MEETING STAFF-STUDENT INTERFACE.jpg"
+    },
+    {
+        "room":  "1S.7C03",
+        "name":  "STAFF GALLERY STORE BOOTH 1S.734Q]",
+        "filename":  "CC.1S.7C03 - STAFF GALLERY STORE BOOTH 1S.734Q].jpg"
+    },
+    {
+        "room":  "1S.7C03A",
+        "name":  "KITCHENETTE \u0026 PRINT STATION",
+        "filename":  "CC.1S.7C03A - KITCHENETTE \u0026 PRINT STATION.jpg"
+    },
+    {
+        "room":  "1S.7C04",
+        "name":  "TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT",
+        "filename":  "CC.1S.7C04 - TOILET - ALL GENDER TOILET - FEMALE CIRCULATION CLEANERS TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7C05",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.7C05 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.7C06",
+        "name":  "SOCIAL BRIDGE LANEWAY",
+        "filename":  "CC.1S.7C06 - SOCIAL BRIDGE LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.7C07",
+        "name":  "INFORMAL",
+        "filename":  "CC.1S.7C07 - INFORMAL.jpg"
+    },
+    {
+        "room":  "1S.7C08",
+        "name":  "FOCUSED SOUTH LANEWAY",
+        "filename":  "CC.1S.7C08 - FOCUSED SOUTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.7C09",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.7C09 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.7C10",
+        "name":  "COLLAB SOUTH LANEWAY",
+        "filename":  "CC.1S.7C10 - COLLAB SOUTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.7C11",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.7C11 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.7C12",
+        "name":  "COLLAB SOUTH LANEWAY",
+        "filename":  "CC.1S.7C12 - COLLAB SOUTH LANEWAY.jpg"
+    },
+    {
+        "room":  "1S.7C13",
+        "name":  "CIRCULATION",
+        "filename":  "CC.1S.7C13 - CIRCULATION.jpg"
+    },
+    {
+        "room":  "1S.7L11",
+        "name":  "LIFT CAR [EL-11]",
+        "filename":  "CC.1S.7L11 - LIFT CAR [EL-11].jpg"
+    },
+    {
+        "room":  "1S.7L12",
+        "name":  "LIFT CAR [EL-12]",
+        "filename":  "CC.1S.7L12 - LIFT CAR [EL-12].jpg"
+    },
+    {
+        "room":  "1S.7L13",
+        "name":  "LIFT CAR [EL-13]",
+        "filename":  "CC.1S.7L13 - LIFT CAR [EL-13].jpg"
+    },
+    {
+        "room":  "1S.7L14",
+        "name":  "LIFT CAR [EL-14]",
+        "filename":  "CC.1S.7L14 - LIFT CAR [EL-14].jpg"
+    },
+    {
+        "room":  "1S.7L15",
+        "name":  "CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -",
+        "filename":  "CC.1S.7L15 - CAR [EL-14] LIFT CAR [EL-15] LIFT TOILET - ALL GENDER TOILET -.jpg"
+    },
+    {
+        "room":  "1S.7L16",
+        "name":  "LIFT CAR [EL-16]",
+        "filename":  "CC.1S.7L16 - LIFT CAR [EL-16].jpg"
+    },
+    {
+        "room":  "1S.7RI01",
+        "name":  "RISER",
+        "filename":  "CC.1S.7RI01 - RISER.jpg"
+    },
+    {
+        "room":  "1S.7RI02",
+        "name":  "PRESS STAIR",
+        "filename":  "CC.1S.7RI02 - PRESS STAIR.jpg"
+    },
+    {
+        "room":  "1S.7RI03",
+        "name":  "RISER",
+        "filename":  "CC.1S.7RI03 - RISER.jpg"
+    },
+    {
+        "room":  "1S.7RI04",
+        "name":  "STAIR PRESS",
+        "filename":  "CC.1S.7RI04 - STAIR PRESS.jpg"
+    },
+    {
+        "room":  "1S.7RI05",
+        "name":  "RISER",
+        "filename":  "CC.1S.7RI05 - RISER.jpg"
+    },
+    {
+        "room":  "1S.7RI06",
+        "name":  "RISER",
+        "filename":  "CC.1S.7RI06 - RISER.jpg"
+    },
+    {
+        "room":  "1S.7RI07",
+        "name":  "BUSPORT EXHAUST RISER",
+        "filename":  "CC.1S.7RI07 - BUSPORT EXHAUST RISER.jpg"
+    },
+    {
+        "room":  "1S.7S01",
+        "name":  "FHR RISER STAIR PRESS RISER SERVICES SERVICES",
+        "filename":  "CC.1S.7S01 - FHR RISER STAIR PRESS RISER SERVICES SERVICES.jpg"
+    },
+    {
+        "room":  "1S.7S02",
+        "name":  "SERVICES SERVICES SERVICES TOILET - UAT",
+        "filename":  "CC.1S.7S02 - SERVICES SERVICES SERVICES TOILET - UAT.jpg"
+    },
+    {
+        "room":  "1S.7S03",
+        "name":  "STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS",
+        "filename":  "CC.1S.7S03 - STAFF-STUDENT INTERFACE FHR RISER STAIR PRESS RISER COMMS.jpg"
+    },
+    {
+        "room":  "1S.7S04",
+        "name":  "SERVICES SERVICES",
+        "filename":  "CC.1S.7S04 - SERVICES SERVICES.jpg"
+    },
+    {
+        "room":  "1S.7S05",
+        "name":  "FHR",
+        "filename":  "CC.1S.7S05 - FHR.jpg"
+    },
+    {
+        "room":  "1S.7S06",
+        "name":  "COMMS",
+        "filename":  "CC.1S.7S06 - COMMS.jpg"
+    },
+    {
+        "room":  "1S.7S07",
+        "name":  "DB",
+        "filename":  "CC.1S.7S07 - DB.jpg"
+    },
+    {
+        "room":  "1S.7S08",
+        "name":  "FHR STAFF GALLERY STORE BOOTH",
+        "filename":  "CC.1S.7S08 - FHR STAFF GALLERY STORE BOOTH.jpg"
+    },
+    {
+        "room":  "1S.7S10",
+        "name":  "FH",
+        "filename":  "CC.1S.7S10 - FH.jpg"
+    },
+    {
+        "room":  "1S.7ST06",
+        "name":  "STAIR 06",
+        "filename":  "CC.1S.7ST06 - STAIR 06.jpg"
+    },
+    {
+        "room":  "1S.7ST07",
+        "name":  "STAIR 07",
+        "filename":  "CC.1S.7ST07 - STAIR 07.jpg"
+    },
+    {
+        "room":  "1S.7ST32",
+        "name":  "STAIR 32",
+        "filename":  "CC.1S.7ST32 - STAIR 32.jpg"
+    },
+    {
+        "room":  "1S.7V00",
+        "name":  "VOID",
+        "filename":  "CC.1S.7V00 - VOID.jpg"
+    },
+    {
+        "room":  "1S.7V01",
+        "name":  "VOID",
+        "filename":  "CC.1S.7V01 - VOID.jpg"
+    },
+    {
+        "room":  "1S.7V02",
+        "name":  "VOID",
+        "filename":  "CC.1S.7V02 - VOID.jpg"
+    }
+]

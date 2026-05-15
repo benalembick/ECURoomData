@@ -18,6 +18,7 @@ interface DbRoom {
   is_archived: boolean;
   physical_notes: string | null;
   booking_notes: string | null;
+  floorplan_image_url: string | null;
   data_quality_flags: string[] | null;
   campuses: { code: string; name: string } | null;
   buildings: { code: string; name: string } | null;
@@ -155,6 +156,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
             is_archived,
             physical_notes,
             booking_notes,
+            floorplan_image_url,
             data_quality_flags,
             campuses(code,name),
             buildings(code,name),
@@ -280,6 +282,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
       isArchived: room.is_archived,
       physicalNotes: room.physical_notes ?? '',
       bookingNotes: room.booking_notes ?? '',
+      floorplanImageUrl: room.floorplan_image_url ?? undefined,
       capabilities: capabilitiesByRoom.get(room.id) ?? [],
       attributes: valuesByRoom.get(room.id) ?? {},
       downstreamSystems: systemsByRoom.get(room.id) ?? pattern?.downstream_system_codes ?? [],
