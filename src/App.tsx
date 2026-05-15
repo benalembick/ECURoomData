@@ -1,4 +1,4 @@
-import { ChangeEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, type MouseEvent as ReactMouseEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { z } from 'zod';
 import {
@@ -37,7 +37,6 @@ import {
   mappings,
   patterns as initialPatterns,
   rooms as initialRooms,
-  systems,
   transformationRules,
 } from './data/mockData';
 import type { AttributeDefinition, Building, Campus, ChangeRequest, ImportPreviewRow, Room, RoomPattern, TaskStatus } from './types';
@@ -90,7 +89,7 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'import', label: 'Import', icon: FileSpreadsheet },
 ];
 
-const ecuLogoUrl = 'https://www.ecu.edu.au/__data/assets/image/0015/1100571/1920w.png';
+const ecuLogoUrl = 'https://www.ecu.edu.au/__data/assets/image/0004/1100389/ecu-logo.png';
 const customImportFieldGroup = 'Custom fields';
 const finalRoomNameAttributeKey = 'final_room_name';
 const roomCapacityAttributeKeys = ['capacity_afm_rm_capacity', 'capacity'];
@@ -98,6 +97,28 @@ const roomCapacityAttributeLabels = ['Capacity (Afm.rm.capacity)', 'CAPACITY'];
 const roomSearchRenderLimit = 250;
 const maxFloorplanImageBytes = 900 * 1024;
 const roomFloorplanManifestUrl = '/room-floorplans/manifest.json';
+const roomFloorplanThumbnailPath = '/room-floorplan-thumbnails/';
+const roomQuickFilters = [
+  { label: 'Create in Outlook', attributeKey: 'create_in_outlook' },
+  { label: 'In Appspace', attributeKey: 'in_appspace_needs_to_be_confirmed' },
+  { label: 'In Momentus', attributeKey: 'in_momentus' },
+  { label: 'In Hector', attributeKey: 'in_hector' },
+  { label: 'People counting', attributeKey: 'people_counting' },
+  { label: 'Outlook available', attributeKey: 'outlook_booking_available' },
+  { label: 'Appspace available', attributeKey: 'appspace_booking_available' },
+  { label: 'Momentus available', attributeKey: 'momentus_booking_available' },
+];
+const impactedSystemSummaryRows = [
+  { label: 'O365', matches: (room: Room) => isYesAttribute(room, 'create_in_outlook') },
+  { label: 'Timetabling', matches: (room: Room) => isYesAttribute(room, 'is_teaching_space') },
+  { label: 'Appspace', matches: (room: Room) => hasAttributeText(room, 'in_appspace_needs_to_be_confirmed', 'Appspace') },
+  { label: 'Momentus', matches: (room: Room) => isYesAttribute(room, 'in_momentus') },
+  { label: 'People Counting', matches: (room: Room) => isYesAttribute(room, 'people_counting') },
+  { label: 'Allow Walk Up Bookings', matches: (room: Room) => isYesAttribute(room, 'room_booking_panel_allows_annonymous_walk_up') },
+  { label: 'General Teaching Space (GTS)', matches: (room: Room) => hasAttributeText(room, 'timetable_room_pool_code_for_outlook_name', 'GTS') },
+  { label: 'Specialised Teaching Space (STS)', matches: (room: Room) => hasAttributeText(room, 'timetable_room_pool_code_for_outlook_name', 'STS') },
+  { label: 'Restricted Teaching Space (RTS)', matches: (room: Room) => hasAttributeText(room, 'timetable_room_pool_code_for_outlook_name', 'RTS') },
+];
 
 type ImportedRoomFields = Partial<
   Pick<Room, 'roomCode' | 'name' | 'campus' | 'building' | 'floor' | 'capacity' | 'owner' | 'pattern' | 'bookingStatus'>
@@ -119,6 +140,21 @@ function getRoomFinalName(room: Room) {
   if (dictionaryName && dictionaryName !== room.roomCode) return dictionaryName;
   if (coreName && coreName !== room.roomCode) return coreName;
   return '';
+}
+
+function isYesAttribute(room: Room, attributeKey: string) {
+  const value = room.attributes[attributeKey];
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (Array.isArray(value)) return value.some((item) => ['yes', 'y', 'true', '1'].includes(item.trim().toLowerCase()));
+  return ['yes', 'y', 'true', '1'].includes(String(value ?? '').trim().toLowerCase());
+}
+
+function hasAttributeText(room: Room, attributeKey: string, expectedText: string) {
+  const value = room.attributes[attributeKey];
+  const expected = expectedText.trim().toLowerCase();
+  if (Array.isArray(value)) return value.some((item) => item.trim().toLowerCase() === expected);
+  return String(value ?? '').trim().toLowerCase() === expected;
 }
 
 function roomDisplayName(room: Room) {
@@ -209,6 +245,13 @@ function normalizeRoomCodeKey(value: string) {
   return value.trim().toUpperCase().replace(/\s+/g, '');
 }
 
+function getRoomFloorplanThumbnailUrl(imageUrl?: string) {
+  if (!imageUrl) return undefined;
+  const roomFloorplanPath = '/room-floorplans/';
+  if (!imageUrl.startsWith(roomFloorplanPath)) return imageUrl;
+  return `${roomFloorplanThumbnailPath}${imageUrl.slice(roomFloorplanPath.length)}`;
+}
+
 function getRoomCapacityValue(room: Room, attributes: AttributeDefinition[] = []) {
   const attributeEntry = Object.entries(room.attributes).find(([key]) => roomCapacityAttributeKeys.includes(key))
     ?? Object.entries(room.attributes).find(([key]) => {
@@ -272,6 +315,7 @@ export function App() {
       ? { percent: 0, completedSteps: 0, totalSteps: 6, message: 'Waiting for Supabase session' }
       : null,
   );
+  const [summaryFilter, setSummaryFilter] = useState<string | null>(null);
   const [hasLoadedRoomData, setHasLoadedRoomData] = useState(false);
   const roomDataLoadRef = useRef<Promise<void> | null>(null);
   const roomDataLoading = isSupabaseConfigured && dataLoading && !hasLoadedRoomData;
@@ -358,6 +402,11 @@ export function App() {
     setView('room-detail');
   };
 
+  const openSummarySearch = (summaryLabel: string) => {
+    setSummaryFilter(summaryLabel);
+    setView('rooms');
+  };
+
   return (
     <div className="min-h-screen bg-ecu-mist">
       <header className="border-b border-slate-200 bg-white">
@@ -370,8 +419,8 @@ export function App() {
           </div>
           <div className="flex min-h-[134px] items-center justify-between border-t border-slate-100 lg:border-l lg:border-t-0 lg:px-20">
             <div>
-              <p className="text-xs font-semibold uppercase tracking-wide text-ecu-green">Digital Campus Operations</p>
-              <h1 className="text-xl font-bold text-ecu-black">Room Data Hub</h1>
+              <p className="text-[1rem] font-semibold uppercase tracking-wide text-ecu-green">Digital Campus Operations</p>
+              <h1 className="text-[1.667rem] font-bold text-ecu-black">Room Data Hub</h1>
             </div>
             <div className="hidden items-center gap-3 md:flex">
               <span className={cn('badge', isSupabaseConfigured ? 'border-emerald-200 bg-emerald-50 text-emerald-700' : 'border-amber-200 bg-amber-50 text-amber-700')}>
@@ -413,7 +462,10 @@ export function App() {
               return (
                 <button
                   key={item.id}
-                  onClick={() => setView(item.id)}
+                  onClick={() => {
+                    if (item.id === 'rooms') setSummaryFilter(null);
+                    setView(item.id);
+                  }}
                   className={cn(
                     'flex min-w-fit items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition lg:w-full',
                     view === item.id || (view === 'room-detail' && item.id === 'rooms')
@@ -434,8 +486,8 @@ export function App() {
         </aside>
 
         <main className="p-4 sm:p-6 lg:p-8">
-          {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} roomDataLoading={roomDataLoading} />}
-          {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} />}
+          {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} openSummarySearch={openSummarySearch} roomDataLoading={roomDataLoading} />}
+          {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
           {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} />}
           {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} />}
@@ -536,11 +588,13 @@ function Dashboard({
   rooms,
   changeRequests,
   openRoom,
+  openSummarySearch,
   roomDataLoading,
 }: {
   rooms: Room[];
   changeRequests: ChangeRequest[];
   openRoom: (id: string) => void;
+  openSummarySearch: (summaryLabel: string) => void;
   roomDataLoading: boolean;
 }) {
   const pendingApprovals = changeRequests.filter((request) => request.status === 'Under Review' || request.status === 'Awaiting Information').length;
@@ -582,20 +636,34 @@ function Dashboard({
             <h3 className="font-bold text-slate-950">Impacted Systems Summary</h3>
           </div>
           <div className="space-y-3 p-4">
-            {roomDataLoading ? <LoadingPanelMessage label="Loading impacted systems" /> : systems.map((system) => {
-              const count = rooms.filter((room) => room.downstreamSystems.includes(system)).length;
-              return (
-                <div key={system}>
-                  <div className="mb-1 flex justify-between text-sm">
-                    <span className="font-medium text-slate-700">{system}</span>
-                    <span className="text-slate-500">{count} rooms</span>
-                  </div>
-                  <div className="h-2 rounded-full bg-slate-100">
-                    <div className="h-2 rounded-full bg-ecu-teal" style={{ width: `${Math.max(10, (count / rooms.length) * 100)}%` }} />
-                  </div>
-                </div>
-              );
-            })}
+            {roomDataLoading ? <LoadingPanelMessage label="Loading impacted systems" /> : (() => {
+              const summaryCounts = impactedSystemSummaryRows.map((summaryRow) => ({
+                ...summaryRow,
+                count: rooms.filter(summaryRow.matches).length,
+              }));
+              const maxSummaryCount = Math.max(...summaryCounts.map((summaryRow) => summaryRow.count), 1);
+
+              return summaryCounts.map((summaryRow) => {
+                const percentage = (summaryRow.count / maxSummaryCount) * 100;
+                return (
+                  <button
+                    key={summaryRow.label}
+                    type="button"
+                    onClick={() => openSummarySearch(summaryRow.label)}
+                    className="block w-full rounded-md p-1 text-left transition hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-ecu-teal focus:ring-offset-2"
+                    aria-label={`Show Room Search results for ${summaryRow.label}`}
+                  >
+                    <div className="mb-1 flex justify-between text-sm">
+                      <span className="font-medium text-slate-700">{summaryRow.label}</span>
+                      <span className="text-slate-500">{summaryRow.count} rooms</span>
+                    </div>
+                    <div className="h-2 rounded-full bg-slate-100">
+                      <div className="h-2 rounded-full bg-ecu-teal" style={{ width: `${summaryRow.count ? Math.max(10, percentage) : 0}%` }} />
+                    </div>
+                  </button>
+                );
+              });
+            })()}
           </div>
         </div>
       </section>
@@ -693,6 +761,8 @@ function RoomSearch({
   openRoom,
   roomDataLoading,
   loadProgress,
+  summaryFilter,
+  clearSummaryFilter,
 }: {
   rooms: Room[];
   campuses: Campus[];
@@ -700,6 +770,8 @@ function RoomSearch({
   openRoom: (id: string) => void;
   roomDataLoading: boolean;
   loadProgress: RoomDataLoadProgress | null;
+  summaryFilter: string | null;
+  clearSummaryFilter: () => void;
 }) {
   const [query, setQuery] = useState('');
   const [campus, setCampus] = useState('All');
@@ -747,25 +819,21 @@ function RoomSearch({
     const q = deferredQuery.trim().toLowerCase();
     const capabilitySearch = deferredCapability.trim().toLowerCase();
     const capacityFloor = Number(deferredMinCapacity);
+    const activeSummaryRow = summaryFilter ? impactedSystemSummaryRows.find((summaryRow) => summaryRow.label === summaryFilter) : undefined;
     return searchIndex.filter(({ room, searchText }) => {
+      const summaryMatch = !activeSummaryRow || activeSummaryRow.matches(room);
       const textMatch = !q || searchText.includes(q);
       const campusMatch = campus === 'All' || room.campus === campus;
       const categoryMatch = category === 'All' || room.category === category;
       const capacityMatch = !deferredMinCapacity || getRoomCapacityNumber(room, attributes) >= capacityFloor;
       const capabilityMatch = !capabilitySearch || room.capabilities.some((item) => item.toLowerCase().includes(capabilitySearch));
       const flagMatch = flags.every((flag) => {
-        if (flag === 'Teaching') return room.isTeaching;
-        if (flag === 'Bookable') return room.isBookable;
-        if (flag === 'Student accessible') return room.isStudentAccessible;
-        if (flag === 'Staff only') return room.isStaffOnly;
-        if (flag === 'Specialist') return room.isSpecialist;
-        if (flag === 'WAAPA') return room.category.includes('WAAPA');
-        if (flag === 'Library') return room.category.includes('Library');
-        return true;
+        const quickFilter = roomQuickFilters.find((filter) => filter.label === flag);
+        return quickFilter ? isTruthyAttributeValue(room.attributes[quickFilter.attributeKey]) : true;
       });
-      return textMatch && campusMatch && categoryMatch && capacityMatch && capabilityMatch && flagMatch;
+      return summaryMatch && textMatch && campusMatch && categoryMatch && capacityMatch && capabilityMatch && flagMatch;
     }).map(({ room }) => room);
-  }, [attributes, searchIndex, deferredQuery, campus, category, flags, deferredMinCapacity, deferredCapability]);
+  }, [attributes, searchIndex, deferredQuery, campus, category, flags, deferredMinCapacity, deferredCapability, summaryFilter]);
   const visibleRooms = filteredRooms.slice(0, roomSearchRenderLimit);
 
   const toggleFlag = (flag: string) => {
@@ -800,13 +868,23 @@ function RoomSearch({
           </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          {['Teaching', 'Bookable', 'Student accessible', 'Staff only', 'Specialist', 'WAAPA', 'Library'].map((flag) => (
+          {summaryFilter && (
             <button
-              key={flag}
-              onClick={() => toggleFlag(flag)}
-              className={cn('badge transition', flags.includes(flag) ? 'border-ecu-teal bg-ecu-mint text-ecu-black' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')}
+              type="button"
+              onClick={clearSummaryFilter}
+              className="badge border-ecu-teal bg-ecu-mint text-ecu-black transition hover:bg-white"
             >
-              {flag}
+              {summaryFilter} results
+              <span className="text-slate-500">Clear</span>
+            </button>
+          )}
+          {roomQuickFilters.map(({ label }) => (
+            <button
+              key={label}
+              onClick={() => toggleFlag(label)}
+              className={cn('badge transition', flags.includes(label) ? 'border-ecu-teal bg-ecu-mint text-ecu-black' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')}
+            >
+              {label}
             </button>
           ))}
         </div>
@@ -841,12 +919,15 @@ function RoomSearch({
         {visibleRooms.map((room) => (
           <button key={room.id} onClick={() => openRoom(room.id)} className="panel rounded-lg p-4 text-left hover:border-ecu-teal">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-slate-950">{roomDisplayName(room)}</h3>
-                  {getActiveRoomQualityFlags(room).length > 0 && <span className="badge border-amber-200 bg-amber-50 text-amber-700"><AlertTriangle size={13} /> Data flag</span>}
+              <div className="flex min-w-0 gap-3">
+                <RoomFloorplanThumbnail imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} isDataLoading={roomDataLoading} />
+                <div className="min-w-0">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h3 className="text-lg font-bold text-slate-950">{roomDisplayName(room)}</h3>
+                    {getActiveRoomQualityFlags(room).length > 0 && <span className="badge border-amber-200 bg-amber-50 text-amber-700"><AlertTriangle size={13} /> Data flag</span>}
+                  </div>
+                  <p className="mt-1 text-sm text-slate-600">{room.campus} · {room.building} · {room.floor}</p>
                 </div>
-                <p className="mt-1 text-sm text-slate-600">{room.campus} · {room.building} · {room.floor}</p>
               </div>
               <div className="grid gap-2 text-sm sm:grid-cols-4 lg:min-w-[560px]">
                 <Fact label="Pattern" value={room.pattern} />
@@ -862,6 +943,43 @@ function RoomSearch({
         ))}
       </div>
     </>
+  );
+}
+
+function RoomFloorplanThumbnail({ imageUrl, roomName, isDataLoading }: { imageUrl?: string; roomName: string; isDataLoading: boolean }) {
+  const thumbnailUrl = getRoomFloorplanThumbnailUrl(imageUrl);
+  const [isLoaded, setIsLoaded] = useState(false);
+  const [hasFailed, setHasFailed] = useState(false);
+  const shouldShowLoader = (!thumbnailUrl && isDataLoading) || (Boolean(thumbnailUrl) && !isLoaded && !hasFailed);
+
+  useEffect(() => {
+    setIsLoaded(false);
+    setHasFailed(false);
+  }, [thumbnailUrl]);
+
+  return (
+    <div className="relative hidden h-20 w-28 shrink-0 overflow-hidden rounded-md border border-slate-200 bg-slate-50 sm:flex sm:items-center sm:justify-center">
+      {thumbnailUrl && !hasFailed ? (
+        <img
+          src={thumbnailUrl}
+          alt={`Floorplan thumbnail for ${roomName}`}
+          className={cn('h-full w-full object-contain transition-opacity duration-150', isLoaded ? 'opacity-100' : 'opacity-0')}
+          loading="lazy"
+          decoding="async"
+          width="112"
+          height="80"
+          onLoad={() => setIsLoaded(true)}
+          onError={() => setHasFailed(true)}
+        />
+      ) : shouldShowLoader ? null : (
+        <ImageIcon size={22} className="text-slate-300" aria-hidden="true" />
+      )}
+      {shouldShowLoader && (
+        <span className="absolute inset-0 flex items-center justify-center bg-slate-50" aria-label={`Loading floorplan thumbnail for ${roomName}`} role="status">
+          <span className="loading-spinner h-5 w-5" aria-hidden="true" />
+        </span>
+      )}
+    </div>
   );
 }
 
@@ -1717,9 +1835,9 @@ function CampusManagement({
                     </div>
                   </div>
                   {expandedCampusCodes.includes(campus.code) && (
-                    <div className="border-t border-slate-100 bg-slate-50 px-4 py-3">
+                    <div className="border-t border-slate-100 bg-slate-50 py-3 pl-8 pr-4 sm:pl-12">
                       {campusBuildings.length ? (
-                        <div className="grid gap-2">
+                        <div className="grid gap-2 border-l border-slate-300 pl-4 sm:pl-5">
                           {campusBuildings.map((building) => (
                             <div key={`${building.campusCode}-${building.code}`} className="flex flex-col gap-3 rounded-md border border-slate-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
                               <div className="min-w-0">
@@ -1741,7 +1859,7 @@ function CampusManagement({
                           ))}
                         </div>
                       ) : (
-                        <div className="rounded-md border border-dashed border-slate-300 bg-white p-3 text-sm text-slate-600">
+                        <div className="ml-4 rounded-md border border-dashed border-slate-300 bg-white p-3 text-sm text-slate-600 sm:ml-5">
                           No buildings recorded for this campus yet.
                         </div>
                       )}
@@ -1994,6 +2112,7 @@ function Patterns({
   const [draft, setDraft] = useState<RoomPattern>(selectedPattern);
   const [roomSearch, setRoomSearch] = useState('');
   const [selectedRoomIds, setSelectedRoomIds] = useState<Set<string>>(new Set());
+  const [isEditingPatterns, setIsEditingPatterns] = useState(false);
 
   useEffect(() => {
     setDraft(selectedPattern);
@@ -2090,12 +2209,42 @@ function Patterns({
     setSelectedRoomIds(new Set());
   };
 
+  if (!isEditingPatterns) {
+    return (
+      <>
+        <PageHeader
+          title="Room Pattern Overview"
+          description="Review governed room patterns, default booking rules, required attributes, and implementation cues before editing the Room Patterns and Categories library."
+          action={<button className="btn-primary" onClick={() => setIsEditingPatterns(true)}><Pencil size={16} /> Edit patterns</button>}
+        />
+        <section className="grid gap-4 lg:grid-cols-2 2xl:grid-cols-3">
+          {patterns.map((pattern) => (
+            <PatternOverviewCard
+              key={pattern.id}
+              pattern={pattern}
+              linkedRooms={rooms.filter((room) => room.pattern === pattern.name).length}
+              onEdit={() => {
+                setSelectedPatternId(pattern.id);
+                setIsEditingPatterns(true);
+              }}
+            />
+          ))}
+        </section>
+      </>
+    );
+  }
+
   return (
     <>
       <PageHeader
         title="Room Patterns and Categories"
         description="Manage reusable room patterns, link ECU and Vizcom AV pattern names, and batch assign matching rooms for initial link up."
-        action={<button className="btn-primary" onClick={createPattern}><Plus size={16} /> New pattern</button>}
+        action={(
+          <div className="flex flex-wrap gap-2">
+            <button className="btn-secondary" onClick={() => setIsEditingPatterns(false)}><ChevronRight size={16} className="rotate-180" /> Overview</button>
+            <button className="btn-primary" onClick={createPattern}><Plus size={16} /> New pattern</button>
+          </div>
+        )}
       />
       <section className="grid gap-6 xl:grid-cols-[360px_1fr]">
         <div className="panel rounded-lg">
@@ -2233,7 +2382,94 @@ function Patterns({
   );
 }
 
+function PatternOverviewCard({
+  pattern,
+  linkedRooms,
+  onEdit,
+}: {
+  pattern: RoomPattern;
+  linkedRooms: number;
+  onEdit: () => void;
+}) {
+  const implementationTemplate = [
+    ...pattern.defaultO365Config,
+    ...pattern.accessLogic,
+    ...pattern.downstreamSystems.map((system) => `${system} update`),
+  ].filter(Boolean);
+  const visibleImplementationItems = uniqueStrings(implementationTemplate).slice(0, 5);
+
+  return (
+    <article className="panel flex min-h-[300px] flex-col rounded-lg p-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="label">{pattern.category}</p>
+          <div className="mt-1 flex items-center gap-2">
+            <Layers3 size={17} className="shrink-0 text-ecu-teal" />
+            <h3 className="text-lg font-bold text-slate-950">{pattern.name}</h3>
+          </div>
+        </div>
+        <StatusBadge status={`${linkedRooms} room${linkedRooms === 1 ? '' : 's'}`} />
+      </div>
+
+      <p className="mt-3 text-sm leading-6 text-slate-600">{pattern.description}</p>
+
+      <div className="mt-4 grid gap-3 text-sm md:grid-cols-[minmax(0,1fr)_minmax(0,1.2fr)]">
+        <div className="space-y-3">
+          <PatternOverviewBlock title="Default booking rules">
+            <PatternOverviewBullets items={pattern.defaultBookingRules} fallback={pattern.timetablingEligible ? 'Timetabling eligible' : 'Not timetabled by default'} />
+          </PatternOverviewBlock>
+
+          <PatternOverviewBlock title="Required attributes">
+            <div className="flex flex-wrap gap-1.5">
+              {pattern.requiredAttributes.length ? pattern.requiredAttributes.map((attribute) => (
+                <span key={attribute} className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                  {attribute}
+                </span>
+              )) : (
+                <span className="text-slate-500">No required attributes set.</span>
+              )}
+            </div>
+          </PatternOverviewBlock>
+        </div>
+
+        <PatternOverviewBlock title="Implementation template" className="h-full">
+          <PatternOverviewBullets items={visibleImplementationItems} fallback="No implementation steps set." />
+        </PatternOverviewBlock>
+      </div>
+
+      <div className="mt-auto flex justify-center pt-6">
+        <button className="btn-secondary px-5 py-3" onClick={onEdit}>
+          <Pencil size={16} /> Edit this pattern
+        </button>
+      </div>
+    </article>
+  );
+}
+
+function PatternOverviewBlock({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+  return (
+    <section className={cn('border border-slate-200 bg-white p-3', className)}>
+      <h4 className="mb-2 font-bold text-slate-950">{title}</h4>
+      {children}
+    </section>
+  );
+}
+
+function PatternOverviewBullets({ items, fallback }: { items: string[]; fallback: string }) {
+  return items.length ? (
+    <ul className="list-disc space-y-1 pl-4 text-slate-600">
+      {items.map((item) => <li key={item}>{item}</li>)}
+    </ul>
+  ) : (
+    <p className="text-slate-500">{fallback}</p>
+  );
+}
+
 function FloorplanPreview({ imageUrl, roomName, className }: { imageUrl?: string; roomName: string; className?: string }) {
+  const [magnifierPosition, setMagnifierPosition] = useState({ x: 50, y: 50 });
+  const [isMagnifying, setIsMagnifying] = useState(false);
+  const [imageRatio, setImageRatio] = useState(1);
+
   if (!imageUrl) {
     return (
       <div className={cn('flex min-h-40 items-center justify-center rounded-md border border-dashed border-slate-300 bg-slate-50 p-4 text-center text-sm text-slate-500', className)}>
@@ -2242,9 +2478,50 @@ function FloorplanPreview({ imageUrl, roomName, className }: { imageUrl?: string
     );
   }
 
+  const updateMagnifierPosition = (event: ReactMouseEvent<HTMLAnchorElement>) => {
+    const bounds = event.currentTarget.getBoundingClientRect();
+    const x = Math.min(100, Math.max(0, ((event.clientX - bounds.left) / bounds.width) * 100));
+    const y = Math.min(100, Math.max(0, ((event.clientY - bounds.top) / bounds.height) * 100));
+    setMagnifierPosition({ x, y });
+  };
+
   return (
-    <a href={imageUrl} target="_blank" rel="noreferrer" className={cn('block overflow-hidden rounded-md border border-slate-200 bg-slate-50', className)}>
-      <img src={imageUrl} alt={`Floorplan for ${roomName}`} className="max-h-72 w-full object-contain" />
+    <a
+      href={imageUrl}
+      target="_blank"
+      rel="noreferrer"
+      aria-label={`Open full-size floorplan for ${roomName}`}
+      className={cn('floorplan-magnifier group block rounded-md border border-slate-200 bg-slate-50', className)}
+      onMouseEnter={() => setIsMagnifying(true)}
+      onMouseLeave={() => setIsMagnifying(false)}
+      onMouseMove={updateMagnifierPosition}
+      onFocus={() => setIsMagnifying(true)}
+      onBlur={() => setIsMagnifying(false)}
+    >
+      <img
+        src={imageUrl}
+        alt={`Floorplan for ${roomName}`}
+        className="max-h-72 w-full object-contain"
+        onLoad={(event) => {
+          const { naturalWidth, naturalHeight } = event.currentTarget;
+          if (naturalWidth && naturalHeight) setImageRatio(naturalWidth / naturalHeight);
+        }}
+      />
+      <span className="floorplan-magnifier__hint">
+        <Search size={15} />
+        Hover to magnify
+      </span>
+      <span
+        className={cn('floorplan-magnifier__lens', isMagnifying && 'floorplan-magnifier__lens--visible')}
+        style={{
+          backgroundImage: `url("${imageUrl}")`,
+          backgroundSize: imageRatio >= 1 ? `520% auto` : `auto 520%`,
+          backgroundPosition: `${magnifierPosition.x}% ${magnifierPosition.y}%`,
+          left: `${magnifierPosition.x}%`,
+          top: `${magnifierPosition.y}%`,
+        }}
+        aria-hidden="true"
+      />
     </a>
   );
 }
@@ -3169,6 +3446,16 @@ function formatAttributeValue(value: string | number | boolean | string[]) {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
+}
+
+function isTruthyAttributeValue(value: string | number | boolean | string[] | undefined) {
+  if (Array.isArray(value)) return value.some(isTruthyAttributeValue);
+  if (typeof value === 'boolean') return value;
+  if (typeof value === 'number') return value > 0;
+  if (typeof value !== 'string') return false;
+
+  const normalized = value.trim().toLowerCase();
+  return ['yes', 'true', 'y', '1', 'bookable', 'available', 'in scope', 'enabled'].includes(normalized);
 }
 
 function coerceImportValue(value: string, type: AttributeDefinition['type']) {

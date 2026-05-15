@@ -68,4 +68,38 @@ textarea {
     @apply inline-block h-6 w-6 rounded-full border-2 border-slate-200 border-t-ecu-teal;
     animation: spin 0.8s linear infinite;
   }
+
+  .floorplan-magnifier {
+    @apply relative cursor-zoom-in overflow-visible;
+  }
+
+  .floorplan-magnifier__hint {
+    @apply pointer-events-none absolute left-3 top-3 z-10 inline-flex items-center gap-1.5 rounded-md border border-white/80 bg-white/90 px-2.5 py-1.5 text-xs font-semibold text-slate-700 shadow-panel transition;
+  }
+
+  .floorplan-magnifier__lens {
+    @apply pointer-events-none absolute z-50 h-44 w-44 -translate-x-1/2 -translate-y-1/2 rounded-full border-4 border-white opacity-0 shadow-panel ring-1 ring-slate-900/20 transition-opacity duration-150;
+    background-color: #ffffff;
+    background-repeat: no-repeat;
+  }
+
+  .floorplan-magnifier__lens--visible {
+    @apply opacity-100;
+  }
+
+  .floorplan-magnifier:hover .floorplan-magnifier__hint,
+  .floorplan-magnifier:focus-visible .floorplan-magnifier__hint {
+    @apply opacity-0;
+  }
+
+  @media (hover: none) {
+    .floorplan-magnifier {
+      @apply cursor-pointer;
+    }
+
+    .floorplan-magnifier__hint,
+    .floorplan-magnifier__lens {
+      @apply hidden;
+    }
+  }
 }
