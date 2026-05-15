@@ -36,6 +36,11 @@ function sendFile(response, filePath) {
   });
 }
 
+function sendNotFound(response) {
+  response.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  response.end('Not found');
+}
+
 http
   .createServer(function (request, response) {
     const parsedUrl = url.parse(request.url);
@@ -52,6 +57,11 @@ http
     fs.stat(filePath, function (error, stats) {
       if (!error && stats.isFile()) {
         sendFile(response, filePath);
+        return;
+      }
+
+      if (path.extname(filePath)) {
+        sendNotFound(response);
         return;
       }
 
