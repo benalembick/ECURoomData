@@ -1,4 +1,15 @@
 export type Role = 'Viewer' | 'Room Data Editor' | 'System Owner' | 'Approver' | 'Admin';
+export type DatabaseRole = 'viewer' | 'room_data_editor' | 'system_owner' | 'approver' | 'admin';
+
+export interface UserProfile {
+  id: string;
+  email: string;
+  displayName: string;
+  role: DatabaseRole;
+  businessUnit?: string;
+  isDisabled?: boolean;
+  createdAt?: string;
+}
 
 export type AttributeType =
   | 'text'

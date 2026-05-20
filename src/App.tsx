@@ -1,4 +1,4 @@
-import { ChangeEvent, type MouseEvent as ReactMouseEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, type FormEvent, type MouseEvent as ReactMouseEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
 import { z } from 'zod';
 import {
@@ -19,6 +19,7 @@ import {
   KeyRound,
   Layers3,
   ListChecks,
+  LockKeyhole,
   Pencil,
   Plus,
   RefreshCcw,
@@ -27,6 +28,8 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
+  UserPlus,
+  Users,
 } from 'lucide-react';
 import {
   attributeDefinitions as initialAttributeDefinitions,
@@ -39,13 +42,15 @@ import {
   rooms as initialRooms,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, Building, Campus, ChangeRequest, ImportPreviewRow, Room, RoomPattern, TaskStatus } from './types';
+import type { AttributeDefinition, Building, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Room, RoomPattern, TaskStatus, UserProfile } from './types';
 import { cn, downloadCsv, titleCase } from './lib/utils';
 import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
-import { persistImportToSupabase, type PersistImportResult } from './services/importPersistence';
+import { persistImportToSupabase, type PersistImportProgress, type PersistImportResult } from './services/importPersistence';
 import { persistBuildingDetails, persistBuildingRemoval, persistCampusDetails, persistCampusMapping, persistCampusRemoval, type CampusMappingProgress } from './services/campusPersistence';
+import { createDataBackup, deleteDataBackup, getBackupOperation, listDataBackups, restoreDataBackup, type BackupOperation, type DataBackupSet } from './services/dataBackups';
 import { loadRoomDataFromSupabase, type RoomDataLoadProgress } from './services/roomData';
+import { getCurrentUserProfile, listUserProfiles, saveUserProfile, type SaveUserPayload } from './services/userManagement';
 import {
   coreRoomFieldOptions,
   compareRoomDataDictionaryGroups,
@@ -64,7 +69,9 @@ type View =
   | 'patterns'
   | 'rules'
   | 'governance'
-  | 'import';
+  | 'import'
+  | 'backups'
+  | 'users';
 
 type ImportStage = 'upload' | 'mapping' | 'approval';
 
@@ -87,6 +94,8 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'rules', label: 'Rules', icon: GitBranch },
   { id: 'governance', label: 'Governance', icon: ClipboardCheck },
   { id: 'import', label: 'Import', icon: FileSpreadsheet },
+  { id: 'backups', label: 'Backups', icon: Archive },
+  { id: 'users', label: 'Users', icon: Users },
 ];
 
 const ecuLogoUrl = 'https://www.ecu.edu.au/__data/assets/image/0004/1100389/ecu-logo.png';
@@ -306,21 +315,22 @@ export function App() {
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
   const [authUserEmail, setAuthUserEmail] = useState('');
+  const [authProfile, setAuthProfile] = useState<UserProfile | null>(null);
   const [authMessage, setAuthMessage] = useState('');
   const [authLoading, setAuthLoading] = useState(false);
+  const [authInitializing, setAuthInitializing] = useState(isSupabaseConfigured);
   const [authRequiredMessage, setAuthRequiredMessage] = useState('');
   const [dataMessage, setDataMessage] = useState('');
-  const [dataLoading, setDataLoading] = useState(isSupabaseConfigured);
-  const [dataLoadProgress, setDataLoadProgress] = useState<RoomDataLoadProgress | null>(
-    isSupabaseConfigured
-      ? { percent: 0, completedSteps: 0, totalSteps: 7, message: 'Loading public Supabase data' }
-      : null,
-  );
+  const [dataLoading, setDataLoading] = useState(false);
+  const [dataLoadProgress, setDataLoadProgress] = useState<RoomDataLoadProgress | null>(null);
   const [summaryFilter, setSummaryFilter] = useState<string | null>(null);
   const [hasLoadedRoomData, setHasLoadedRoomData] = useState(false);
   const roomDataLoadRef = useRef<Promise<void> | null>(null);
   const roomDataLoading = isSupabaseConfigured && dataLoading && !hasLoadedRoomData;
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0];
+  const canEdit = !isSupabaseConfigured || authProfile?.role === 'room_data_editor' || authProfile?.role === 'admin';
+  const canManageUsers = authProfile?.role === 'admin';
+  const visibleNavItems = navItems.filter((item) => !['users', 'backups'].includes(item.id) || canManageUsers);
 
   const refreshRoomData = useCallback(async () => {
     if (!supabase) return;
@@ -359,17 +369,40 @@ export function App() {
 
   useEffect(() => {
     if (!supabase) return;
+    const supabaseClient = supabase;
 
-    void refreshRoomData();
+    const applySessionUser = async (email?: string | null) => {
+      setAuthUserEmail(email ?? '');
+      if (!email) {
+        setAuthProfile(null);
+        setHasLoadedRoomData(false);
+        setAuthInitializing(false);
+        return;
+      }
 
-    supabase.auth.getUser().then(({ data }) => {
-      setAuthUserEmail(data.user?.email ?? '');
+      const profile = await getCurrentUserProfile();
+      if (profile?.isDisabled) {
+        await supabaseClient.auth.signOut();
+        setAuthUserEmail('');
+        setAuthProfile(null);
+        setAuthMessage('This account has been disabled.');
+        setAuthInitializing(false);
+        return;
+      }
+      setAuthProfile(profile);
+      setAuthInitializing(false);
+      void refreshRoomData();
+    };
+
+    supabaseClient.auth.getSession().then(({ data }) => {
+      void applySessionUser(data.session?.user.email);
+    }).catch(() => {
+      setAuthInitializing(false);
     });
 
-    const { data: listener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setAuthUserEmail(session?.user.email ?? '');
+    const { data: listener } = supabaseClient.auth.onAuthStateChange((_event, session) => {
+      void applySessionUser(session?.user.email);
       if (session?.user.email) setAuthMessage('');
-      if (session?.user.email) void refreshRoomData();
     });
 
     return () => listener.subscription.unsubscribe();
@@ -391,15 +424,45 @@ export function App() {
     if (!supabase) return;
     await supabase.auth.signOut();
     setAuthUserEmail('');
+    setAuthProfile(null);
     setAuthPassword('');
+    setRooms(initialRooms);
+    setCampusesData(initialCampuses);
+    setBuildingsData(initialBuildings);
+    setRoomPatterns(initialPatterns);
+    setAttributeDefinitions(initialAttributeDefinitions);
+    setHasLoadedRoomData(false);
+    setDataMessage('');
+    setView('dashboard');
     setAuthMessage('Signed out.');
   };
 
   const requireAuthenticatedEdit = useCallback((action = 'save changes') => {
-    if (!isSupabaseConfigured || authUserEmail) return true;
-    setAuthRequiredMessage(`Please sign in before you ${action}. Public visitors can view Supabase data, but edits are restricted to authorised users.`);
-    return false;
-  }, [authUserEmail]);
+    if (!isSupabaseConfigured) return true;
+    if (!authUserEmail) {
+      setAuthRequiredMessage(`Please sign in before you ${action}.`);
+      return false;
+    }
+    if (!canEdit) {
+      setAuthRequiredMessage('Your account is readonly. Ask an admin to enable editing before making this change.');
+      return false;
+    }
+    return true;
+  }, [authUserEmail, canEdit]);
+
+  if (isSupabaseConfigured && (!authUserEmail || authInitializing)) {
+    return (
+      <LoginPage
+        email={authEmail}
+        password={authPassword}
+        message={authMessage}
+        loading={authLoading || authInitializing}
+        setEmail={setAuthEmail}
+        setPassword={setAuthPassword}
+        signIn={signIn}
+      />
+    );
+  }
 
   const openRoom = (roomId: string) => {
     setSelectedRoomId(roomId);
@@ -439,6 +502,7 @@ export function App() {
                 email={authEmail}
                 password={authPassword}
                 userEmail={authUserEmail}
+                profile={authProfile}
                 message={authMessage}
                 loading={authLoading}
                 setEmail={setAuthEmail}
@@ -466,7 +530,7 @@ export function App() {
       <div className="grid min-h-[calc(100vh-139px)] grid-cols-1 lg:grid-cols-[248px_1fr]">
         <aside className="border-b border-slate-200 bg-white lg:border-b-0 lg:border-r">
           <nav className="flex gap-2 overflow-x-auto p-3 lg:block lg:space-y-1">
-            {navItems.map((item) => {
+            {visibleNavItems.map((item) => {
               const Icon = item.icon;
               return (
                 <button
@@ -504,6 +568,8 @@ export function App() {
           {view === 'rules' && <Rules />}
           {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'backups' && canManageUsers && <DataBackups refreshRoomData={refreshRoomData} />}
+          {view === 'users' && canManageUsers && <UserManagement currentUser={authProfile} />}
         </main>
       </div>
       {authRequiredMessage && (
@@ -513,6 +579,81 @@ export function App() {
         />
       )}
     </div>
+  );
+}
+
+function LoginPage({
+  email,
+  password,
+  message,
+  loading,
+  setEmail,
+  setPassword,
+  signIn,
+}: {
+  email: string;
+  password: string;
+  message: string;
+  loading: boolean;
+  setEmail: (value: string) => void;
+  setPassword: (value: string) => void;
+  signIn: () => void;
+}) {
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!email || !password || loading) return;
+    signIn();
+  };
+
+  return (
+    <main className="flex min-h-screen items-center justify-center bg-ecu-mist p-4">
+      <section className="grid w-full max-w-5xl overflow-hidden rounded-lg border border-slate-200 bg-white shadow-panel lg:grid-cols-[0.95fr_1.05fr]">
+        <div className="flex min-h-[520px] flex-col justify-between bg-ecu-black p-8 text-white">
+          <div>
+            <div className="h-[92px] w-[128px] overflow-hidden rounded-md bg-white p-3">
+              <img src={ecuLogoUrl} alt="Edith Cowan University" className="h-full w-full object-contain" />
+            </div>
+            <p className="mt-10 text-sm font-semibold uppercase tracking-wide text-ecu-mint">Digital Campus Operations</p>
+            <h1 className="mt-3 text-3xl font-bold">Room Data Hub</h1>
+            <p className="mt-4 max-w-md text-sm leading-6 text-slate-200">
+              Sign in to view room data, floorplans, governance status, and import workflows.
+            </p>
+          </div>
+          <div className="grid gap-3 text-sm text-slate-200">
+            <div className="flex items-center gap-2"><ShieldCheck size={16} /> Readonly users can inspect room data.</div>
+            <div className="flex items-center gap-2"><Pencil size={16} /> Edit-enabled users can update governed records.</div>
+            <div className="flex items-center gap-2"><Users size={16} /> Admins can manage user access.</div>
+          </div>
+        </div>
+
+        <form className="flex min-h-[520px] flex-col justify-center p-8 sm:p-12" onSubmit={submit}>
+          <div className="mb-8">
+            <div className="inline-flex rounded-md bg-ecu-mint p-3 text-ecu-black">
+              <LockKeyhole size={24} />
+            </div>
+            <h2 className="mt-5 text-2xl font-bold text-slate-950">Sign in</h2>
+            <p className="mt-2 text-sm text-slate-600">Use your assigned Room Data Hub account.</p>
+          </div>
+
+          <div className="space-y-4">
+            <label className="block">
+              <span className="label">Email</span>
+              <input className="input mt-1" type="email" autoComplete="email" value={email} onChange={(event) => setEmail(event.target.value)} />
+            </label>
+            <label className="block">
+              <span className="label">Password</span>
+              <input className="input mt-1" type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+            </label>
+          </div>
+
+          {message && <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{message}</p>}
+
+          <button className="btn-primary mt-6 w-full" type="submit" disabled={loading || !email || !password}>
+            {loading ? 'Checking access...' : 'Sign in'}
+          </button>
+        </form>
+      </section>
+    </main>
   );
 }
 
@@ -553,6 +694,7 @@ function SupabaseAuthControls({
   email,
   password,
   userEmail,
+  profile,
   message,
   loading,
   setEmail,
@@ -565,6 +707,7 @@ function SupabaseAuthControls({
   email: string;
   password: string;
   userEmail: string;
+  profile: UserProfile | null;
   message: string;
   loading: boolean;
   setEmail: (value: string) => void;
@@ -586,7 +729,7 @@ function SupabaseAuthControls({
     return (
       <div className="flex items-center gap-2">
         <span className="badge border-emerald-200 bg-emerald-50 text-emerald-700">
-          <ShieldCheck size={14} /> {userEmail}
+          <ShieldCheck size={14} /> {userEmail} · {roleLabel(profile?.role ?? 'viewer')}
         </span>
         <button className="btn-secondary py-1 text-xs" disabled={dataLoading} onClick={refreshRoomData}>
           <RefreshCcw size={14} /> {dataLoading ? 'Loading...' : 'Reload data'}
@@ -621,6 +764,518 @@ function SupabaseAuthControls({
       {message && <p className="w-full text-right text-xs text-red-600">{message}</p>}
     </div>
   );
+}
+
+const managedRoleOptions: { value: DatabaseRole; label: string; detail: string }[] = [
+  { value: 'viewer', label: 'Readonly', detail: 'Can sign in and view room data.' },
+  { value: 'room_data_editor', label: 'Edit enabled', detail: 'Can update room data, locations, imports, and governance items.' },
+  { value: 'admin', label: 'Admin', detail: 'Can edit data and manage user access.' },
+];
+
+function roleLabel(role: DatabaseRole) {
+  return managedRoleOptions.find((option) => option.value === role)?.label ?? titleCase(role.replace(/_/g, ' '));
+}
+
+function UserManagement({ currentUser }: { currentUser: UserProfile | null }) {
+  const [users, setUsers] = useState<UserProfile[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [draft, setDraft] = useState<SaveUserPayload>({
+    email: '',
+    displayName: '',
+    role: 'viewer',
+    businessUnit: '',
+    isDisabled: false,
+    password: '',
+  });
+
+  const selectedUser = users.find((user) => user.id === selectedId) ?? null;
+
+  const loadUsers = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setUsers(await listUserProfiles());
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Could not load users.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadUsers();
+  }, [loadUsers]);
+
+  const selectUser = (user: UserProfile) => {
+    setSelectedId(user.id);
+    setDraft({
+      id: user.id,
+      email: user.email,
+      displayName: user.displayName,
+      role: user.role,
+      businessUnit: user.businessUnit ?? '',
+      isDisabled: user.isDisabled ?? false,
+      password: '',
+    });
+    setMessage('');
+    setError('');
+  };
+
+  const startNewUser = () => {
+    setSelectedId(null);
+    setDraft({ email: '', displayName: '', role: 'viewer', businessUnit: '', isDisabled: false, password: '' });
+    setMessage('');
+    setError('');
+  };
+
+  const saveUser = async () => {
+    setSaving(true);
+    setMessage('');
+    setError('');
+    try {
+      const saved = await saveUserProfile(draft);
+      setUsers((current) => {
+        const exists = current.some((user) => user.id === saved.id);
+        return exists
+          ? current.map((user) => (user.id === saved.id ? saved : user))
+          : [...current, saved].sort((a, b) => a.displayName.localeCompare(b.displayName));
+      });
+      setSelectedId(saved.id);
+      setDraft({ ...draft, id: saved.id, isDisabled: saved.isDisabled, password: '' });
+      setMessage(`${saved.displayName} is now ${saved.isDisabled ? 'disabled' : roleLabel(saved.role).toLowerCase()}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not save user.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const canSave = draft.email.trim() && draft.displayName.trim() && (draft.id || draft.password?.trim());
+
+  return (
+    <>
+      <PageHeader
+        title="User Management"
+        description="Set up Room Data Hub users as readonly, edit enabled, or admin accounts."
+        action={<button className="btn-primary" onClick={startNewUser}><UserPlus size={16} /> New user</button>}
+      />
+
+      <section className="grid gap-6 xl:grid-cols-[0.95fr_1.05fr]">
+        <div className="panel rounded-lg">
+          <div className="flex items-center justify-between border-b border-slate-200 p-4">
+            <h3 className="font-bold text-slate-950">Users</h3>
+            <button className="btn-secondary py-1 text-xs" onClick={loadUsers} disabled={loading}>
+              <RefreshCcw size={14} /> {loading ? 'Loading...' : 'Refresh'}
+            </button>
+          </div>
+          <div className="divide-y divide-slate-100">
+            {loading && <div className="p-4"><LoadingPanelMessage label="Loading users" /></div>}
+            {!loading && users.map((user) => (
+              <button
+                key={user.id}
+                className={cn('block w-full px-4 py-3 text-left transition hover:bg-slate-50', selectedId === user.id && 'bg-ecu-mint')}
+                onClick={() => selectUser(user)}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-semibold text-slate-950">{user.displayName}</p>
+                    <p className="text-sm text-slate-600">{user.email}</p>
+                  </div>
+                  <span className={cn(
+                    'badge',
+                    user.isDisabled && 'border-red-200 bg-red-50 text-red-700',
+                    !user.isDisabled && user.role === 'viewer' && 'border-slate-200 bg-slate-50 text-slate-700',
+                    !user.isDisabled && user.role === 'room_data_editor' && 'border-emerald-200 bg-emerald-50 text-emerald-700',
+                    !user.isDisabled && user.role === 'admin' && 'border-purple-200 bg-purple-50 text-purple-700',
+                  )}>
+                    {user.isDisabled ? 'Disabled' : roleLabel(user.role)}
+                  </span>
+                </div>
+              </button>
+            ))}
+            {!loading && !users.length && <p className="p-4 text-sm text-slate-600">No user profiles found.</p>}
+          </div>
+        </div>
+
+        <div className="panel rounded-lg p-5">
+          <div className="mb-5">
+            <h3 className="text-lg font-bold text-slate-950">{selectedUser ? 'Edit user access' : 'Create user'}</h3>
+            <p className="mt-1 text-sm text-slate-600">
+              {currentUser?.email ? `Signed in as ${currentUser.email}.` : 'Only admins can save user changes.'}
+            </p>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <TextInput label="Display name" value={draft.displayName} onChange={(value) => setDraft({ ...draft, displayName: value })} />
+            <TextInput label="Email" value={draft.email} onChange={(value) => setDraft({ ...draft, email: value })} />
+            <label className="block sm:col-span-2">
+              <span className="label">Access</span>
+              <select className="input mt-1" value={draft.role} onChange={(event) => setDraft({ ...draft, role: event.target.value as DatabaseRole })}>
+                {managedRoleOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+              <p className="mt-1 text-xs text-slate-500">{managedRoleOptions.find((option) => option.value === draft.role)?.detail}</p>
+            </label>
+            <TextInput label="Business unit" value={draft.businessUnit ?? ''} onChange={(value) => setDraft({ ...draft, businessUnit: value })} />
+            <label className="block">
+              <span className="label">{draft.id ? 'New password' : 'Temporary password'}</span>
+              <input
+                className="input mt-1"
+                type="password"
+                value={draft.password ?? ''}
+                placeholder={draft.id ? 'Leave blank to keep current password' : ''}
+                onChange={(event) => setDraft({ ...draft, password: event.target.value })}
+              />
+            </label>
+            <label className="flex items-start gap-3 rounded-md border border-slate-200 bg-slate-50 p-3 sm:col-span-2">
+              <input
+                className="mt-1 h-4 w-4 accent-ecu-teal"
+                type="checkbox"
+                checked={Boolean(draft.isDisabled)}
+                onChange={(event) => setDraft({ ...draft, isDisabled: event.target.checked })}
+              />
+              <span>
+                <span className="block text-sm font-semibold text-slate-900">Disable sign-in</span>
+                <span className="block text-xs leading-5 text-slate-600">Disabled users stay in the user list but cannot sign in until re-enabled.</span>
+              </span>
+            </label>
+          </div>
+
+          {message && <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
+          {error && <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+
+          <div className="mt-6 flex justify-end">
+            <button className="btn-primary" disabled={saving || !canSave} onClick={saveUser}>
+              <CheckCircle2 size={16} /> {saving ? 'Saving...' : 'Save user'}
+            </button>
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function DataBackups({ refreshRoomData }: { refreshRoomData: () => Promise<void> }) {
+  const [backups, setBackups] = useState<DataBackupSet[]>([]);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [title, setTitle] = useState(() => `Room data backup ${formatBackupDate(new Date().toISOString())}`);
+  const [description, setDescription] = useState('');
+  const [loading, setLoading] = useState(true);
+  const [working, setWorking] = useState(false);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [activeOperation, setActiveOperation] = useState<BackupOperation | null>(null);
+  const [message, setMessage] = useState('');
+  const [error, setError] = useState('');
+
+  const selectedBackup = backups.find((backup) => backup.id === selectedId) ?? backups[0] ?? null;
+
+  const loadBackups = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const loaded = await listDataBackups();
+      setBackups(loaded);
+      setSelectedId((current) => current && loaded.some((backup) => backup.id === current) ? current : loaded[0]?.id ?? null);
+    } catch (loadError) {
+      setError(loadError instanceof Error ? loadError.message : 'Could not load backups.');
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadBackups();
+  }, [loadBackups]);
+
+  useEffect(() => {
+    if (!activeOperation || activeOperation.status !== 'running') return;
+
+    const intervalId = window.setInterval(async () => {
+      try {
+        const operation = await getBackupOperation(activeOperation.id);
+        setActiveOperation(operation);
+        if (operation.status === 'completed') {
+          setWorking(false);
+          if (operation.backup) {
+            const completedBackup = operation.backup;
+            setBackups((current) => {
+              const exists = current.some((backup) => backup.id === completedBackup.id);
+              return exists
+                ? current.map((backup) => (backup.id === completedBackup.id ? completedBackup : backup))
+                : [completedBackup, ...current];
+            });
+            setSelectedId(completedBackup.id);
+          }
+          if (operation.type === 'backup' && operation.backup) {
+            setTitle(`Room data backup ${formatBackupDate(new Date().toISOString())}`);
+            setDescription('');
+            setMessage(`Created backup with ${operation.backup.totalRows.toLocaleString()} row${operation.backup.totalRows === 1 ? '' : 's'}.`);
+          }
+          if (operation.type === 'restore') {
+            setMessage('Restore complete. Refreshing room data now.');
+            await refreshRoomData();
+          }
+        }
+        if (operation.status === 'failed') {
+          setWorking(false);
+          setError(operation.error ?? operation.message ?? 'Backup operation failed.');
+        }
+      } catch (pollError) {
+        setWorking(false);
+        setError(pollError instanceof Error ? pollError.message : 'Could not read backup progress.');
+      }
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeOperation, refreshRoomData]);
+
+  const createBackup = async () => {
+    setWorking(true);
+    setActiveOperation(null);
+    setMessage('');
+    setError('');
+    try {
+      const operation = await createDataBackup(title, description);
+      setActiveOperation(operation);
+      setMessage('Backup started.');
+    } catch (createError) {
+      setWorking(false);
+      setError(createError instanceof Error ? createError.message : 'Could not create backup.');
+    }
+  };
+
+  const restoreBackup = async () => {
+    if (!selectedBackup) return;
+    const confirmed = window.confirm(`Restore "${selectedBackup.title}" from ${formatBackupDate(selectedBackup.createdAt)}? This replaces the current room data, configuration, imports, and governance records.`);
+    if (!confirmed) return;
+
+    setWorking(true);
+    setActiveOperation(null);
+    setMessage('');
+    setError('');
+    try {
+      const operation = await restoreDataBackup(selectedBackup.id);
+      setActiveOperation(operation);
+      setMessage('Restore started.');
+    } catch (restoreError) {
+      setWorking(false);
+      setError(restoreError instanceof Error ? restoreError.message : 'Could not restore backup.');
+    }
+  };
+
+  const deleteBackup = async () => {
+    if (!selectedBackup) return;
+    const confirmed = window.confirm(`Delete "${selectedBackup.title}"? This removes the backup set and all stored snapshot rows.`);
+    if (!confirmed) return;
+
+    setDeletingId(selectedBackup.id);
+    setMessage('');
+    setError('');
+    try {
+      const deletedId = await deleteDataBackup(selectedBackup.id);
+      setBackups((current) => {
+        const next = current.filter((backup) => backup.id !== deletedId);
+        setSelectedId(next[0]?.id ?? null);
+        return next;
+      });
+      setMessage('Backup deleted.');
+    } catch (deleteError) {
+      setError(deleteError instanceof Error ? deleteError.message : 'Could not delete backup.');
+    } finally {
+      setDeletingId(null);
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Data Backups"
+        description="Create dated room data backup sets, inspect row counts, and restore a previous set when a controlled rollback is needed."
+        action={<button className="btn-secondary" onClick={loadBackups} disabled={loading || working}><RefreshCcw size={16} /> Refresh</button>}
+      />
+
+      {activeOperation && <BackupOperationProgress operation={activeOperation} />}
+
+      <section className="grid gap-6 xl:grid-cols-[0.9fr_1.1fr]">
+        <div className="space-y-6">
+          <div className="panel rounded-lg p-5">
+            <div className="mb-5 flex items-start gap-3">
+              <div className="rounded-md bg-ecu-mint p-2 text-ecu-green">
+                <Database size={20} />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-slate-950">Create backup set</h3>
+                <p className="mt-1 text-sm text-slate-600">Snapshots include rooms, campuses, buildings, patterns, dynamic attributes, imports, and governance records.</p>
+              </div>
+            </div>
+
+            <div className="space-y-4">
+              <TextInput label="Backup name" value={title} onChange={setTitle} />
+              <label className="block">
+                <span className="label">Notes</span>
+                <textarea className="input mt-1 min-h-24" value={description} onChange={(event) => setDescription(event.target.value)} />
+              </label>
+              <button className="btn-primary w-full" disabled={working || !title.trim()} onClick={createBackup}>
+                <Archive size={16} /> {working ? 'Working...' : 'Back up current data'}
+              </button>
+            </div>
+          </div>
+
+          <div className="panel rounded-lg overflow-hidden">
+            <div className="border-b border-slate-200 p-4">
+              <h3 className="font-bold text-slate-950">Backup sets</h3>
+            </div>
+            <div className="divide-y divide-slate-100">
+              {loading && <div className="p-4"><LoadingPanelMessage label="Loading backups" /></div>}
+              {!loading && backups.map((backup) => (
+                <button
+                  key={backup.id}
+                  className={cn('block w-full px-4 py-3 text-left transition hover:bg-slate-50', selectedBackup?.id === backup.id && 'bg-ecu-mint')}
+                  onClick={() => setSelectedId(backup.id)}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="font-semibold text-slate-950">{backup.title}</p>
+                      <p className="mt-1 text-sm text-slate-600">{formatBackupDate(backup.createdAt)}</p>
+                      {backup.restoredAt && <p className="mt-1 text-xs text-amber-700">Last restored {formatBackupDate(backup.restoredAt)}</p>}
+                    </div>
+                    <span className="badge border-slate-200 bg-white text-slate-700">{backup.totalRows.toLocaleString()} rows</span>
+                  </div>
+                </button>
+              ))}
+              {!loading && !backups.length && <p className="p-4 text-sm text-slate-600">No backups have been created yet.</p>}
+            </div>
+          </div>
+        </div>
+
+        <div className="panel rounded-lg p-5">
+          {selectedBackup ? (
+            <>
+              <div className="flex flex-col gap-4 border-b border-slate-200 pb-5 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h3 className="text-lg font-bold text-slate-950">{selectedBackup.title}</h3>
+                  <p className="mt-1 text-sm text-slate-600">Created {formatBackupDate(selectedBackup.createdAt)}</p>
+                  {selectedBackup.description && <p className="mt-3 text-sm leading-6 text-slate-700">{selectedBackup.description}</p>}
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button className="btn-secondary" disabled={working || deletingId === selectedBackup.id} onClick={deleteBackup}>
+                    <Trash2 size={16} /> {deletingId === selectedBackup.id ? 'Deleting...' : 'Delete'}
+                  </button>
+                  <button className="btn-primary" disabled={working || deletingId === selectedBackup.id} onClick={restoreBackup}>
+                    <RefreshCcw size={16} /> {working ? 'Working...' : 'Restore this backup'}
+                  </button>
+                </div>
+              </div>
+
+              <div className="mt-5 grid gap-3 sm:grid-cols-3">
+                <BackupMetric icon={Database} label="Total rows" value={selectedBackup.totalRows.toLocaleString()} detail="Rows captured" />
+                <BackupMetric icon={Building2} label="Rooms" value={(selectedBackup.rowCounts.rooms ?? 0).toLocaleString()} detail="Room records" />
+                <BackupMetric icon={ListChecks} label="Attributes" value={(selectedBackup.rowCounts.room_attribute_values ?? 0).toLocaleString()} detail="Dynamic values" />
+              </div>
+
+              <BackupRowCounts rowCounts={selectedBackup.rowCounts} />
+            </>
+          ) : (
+            <div className="rounded-md border border-dashed border-slate-300 p-6 text-center text-sm text-slate-600">
+              Choose a backup set to inspect its row counts.
+            </div>
+          )}
+
+          {message && <p className="mt-4 rounded-md border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">{message}</p>}
+          {error && <p className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function BackupMetric({ icon: Icon, label, value, detail }: { icon: typeof Home; label: string; value: string; detail: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+      <div className="flex items-center justify-between gap-3">
+        <p className="label">{label}</p>
+        <Icon size={16} className="text-ecu-green" />
+      </div>
+      <p className="mt-2 text-2xl font-bold text-slate-950">{value}</p>
+      <p className="mt-1 text-xs text-slate-600">{detail}</p>
+    </div>
+  );
+}
+
+function BackupOperationProgress({ operation }: { operation: BackupOperation }) {
+  const isFailed = operation.status === 'failed';
+  const isComplete = operation.status === 'completed';
+  const tableLabel = operation.currentTable ? operation.currentTable.replace(/_/g, ' ') : '';
+
+  return (
+    <div className={cn(
+      'mb-6 rounded-lg border p-4',
+      isFailed && 'border-red-200 bg-red-50 text-red-800',
+      isComplete && 'border-emerald-200 bg-emerald-50 text-emerald-800',
+      !isFailed && !isComplete && 'border-ecu-teal/30 bg-ecu-mint text-slate-800',
+    )}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-semibold text-slate-950">
+            {operation.type === 'backup' ? 'Backup progress' : 'Restore progress'}
+          </p>
+          <p className="mt-1 text-sm">{operation.message}</p>
+        </div>
+        <span className="badge border-white/70 bg-white text-slate-700">
+          {operation.percent}% complete
+        </span>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className={cn('h-full rounded-full transition-all', isFailed ? 'bg-red-500' : isComplete ? 'bg-emerald-500' : 'bg-ecu-teal')}
+          style={{ width: `${Math.max(operation.percent, operation.status === 'running' ? 6 : 0)}%` }}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-3 text-xs font-medium text-slate-600">
+        <span>{operation.completedTables} of {operation.totalTables} table{operation.totalTables === 1 ? '' : 's'}</span>
+        {tableLabel && <span>Current: {tableLabel}</span>}
+        {operation.processedRows ? <span>{operation.processedRows.toLocaleString()} rows processed</span> : null}
+        {operation.currentTableRows ? <span>{operation.currentTableRows.toLocaleString()} rows in current table</span> : null}
+      </div>
+    </div>
+  );
+}
+
+function BackupRowCounts({ rowCounts }: { rowCounts: Record<string, number> }) {
+  const rows = Object.entries(rowCounts).sort(([first], [second]) => first.localeCompare(second));
+
+  return (
+    <div className="mt-6 overflow-x-auto">
+      <table className="w-full min-w-[520px] text-sm">
+        <thead className="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
+          <tr>
+            <th className="px-3 py-2 font-semibold">Data table</th>
+            <th className="px-3 py-2 text-right font-semibold">Rows</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y divide-slate-100">
+          {rows.map(([tableName, count]) => (
+            <tr key={tableName}>
+              <td className="px-3 py-2 font-medium text-slate-800">{tableName.replace(/_/g, ' ')}</td>
+              <td className="px-3 py-2 text-right text-slate-700">{count.toLocaleString()}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function formatBackupDate(value: string) {
+  return new Intl.DateTimeFormat('en-AU', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value));
 }
 
 function Dashboard({
@@ -955,7 +1610,9 @@ function RoomSearch({
             <p className="font-medium text-slate-700">Refine filters to narrow the result list, or export all matches.</p>
           )}
         </div>
-        {visibleRooms.map((room) => (
+        {visibleRooms.map((room) => {
+          const attributeBadges = getVisibleRoomAttributeBadges(room, attributes, 6);
+          return (
           <button key={room.id} onClick={() => openRoom(room.id)} className="panel rounded-lg p-4 text-left hover:border-ecu-teal">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex min-w-0 gap-3">
@@ -977,9 +1634,15 @@ function RoomSearch({
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
               {room.capabilities.slice(0, 5).map((capabilityItem) => <span key={capabilityItem} className="badge border-slate-200 bg-slate-50 text-slate-600">{capabilityItem}</span>)}
+              {attributeBadges.map((attribute) => (
+                <span key={attribute.key} className="badge border-ecu-teal/30 bg-ecu-mint text-ecu-black">
+                  {attribute.label}: {attribute.value}
+                </span>
+              ))}
             </div>
           </button>
-        ))}
+          );
+        })}
       </div>
     </>
   );
@@ -3099,6 +3762,7 @@ function ImportWizard({
   const [isCommitting, setIsCommitting] = useState(false);
   const [commitError, setCommitError] = useState('');
   const [commitResult, setCommitResult] = useState<PersistImportResult | null>(null);
+  const [commitProgress, setCommitProgress] = useState<PersistImportProgress | null>(null);
   const attributeFieldOptions = useMemo(() => {
     const byKey = new Map([...roomDataDictionaryDefinitions, ...attributes].map((attribute) => [attribute.key, attribute]));
     return Array.from(byKey.values()).sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label));
@@ -3107,6 +3771,14 @@ function ImportWizard({
     const mappedKeys = new Set(Object.values(mapping).flatMap((destination) => destination.startsWith('attr:') ? [destination.slice(5)] : []));
     return attributeFieldOptions.filter((field) => mappedKeys.has(field.key));
   }, [attributeFieldOptions, mapping]);
+  const mappedDynamicDefinitions = useMemo(
+    () => getDynamicAttributeDefinitionsFromMapping(mapping, rows, attributes),
+    [attributes, mapping, rows],
+  );
+  const importAttributeDefinitions = useMemo(
+    () => mergeAttributeDefinitions(createdFields, mappedDynamicDefinitions, mappedDictionaryDefinitions),
+    [createdFields, mappedDynamicDefinitions, mappedDictionaryDefinitions],
+  );
 
   const preview = useMemo<ImportPreviewRow[]>(() => {
     return rows.map((row, index) => {
@@ -3149,6 +3821,7 @@ function ImportWizard({
         setCommitted(false);
         setCommitError('');
         setCommitResult(null);
+        setCommitProgress(null);
         setStage('mapping');
       },
     });
@@ -3167,6 +3840,9 @@ function ImportWizard({
     };
     setCreatedFields((current) => current.some((item) => item.key === key) ? current : [...current, field]);
     setMapping({ ...mapping, [header]: 'create_dynamic_attribute' });
+    setCommitted(false);
+    setCommitResult(null);
+    setCommitProgress(null);
     setStage('mapping');
   };
 
@@ -3198,6 +3874,7 @@ function ImportWizard({
     setCommitted(false);
     setCommitResult(null);
     setCommitError('');
+    setCommitProgress(null);
   };
 
   const applyImportLocally = () => {
@@ -3208,9 +3885,17 @@ function ImportWizard({
       const source = previewRow.source;
       const code = roomCodeHeader ? source[roomCodeHeader] : `IMPORT.${previewRow.id}`;
       const existingIndex = nextRooms.findIndex((room) => room.roomCode === code);
-      const mapped = mapSourceToRoom(source, mapping, mergeAttributeDefinitions(createdFields, mappedDictionaryDefinitions));
+      const mapped = mapSourceToRoom(source, mapping, importAttributeDefinitions);
       if (existingIndex >= 0) {
-        nextRooms[existingIndex] = { ...nextRooms[existingIndex], ...mapped, qualityFlags: [...new Set([...nextRooms[existingIndex].qualityFlags, 'Imported update pending governance review'])] };
+        nextRooms[existingIndex] = {
+          ...nextRooms[existingIndex],
+          ...mapped,
+          attributes: {
+            ...nextRooms[existingIndex].attributes,
+            ...(mapped.attributes ?? {}),
+          },
+          qualityFlags: [...new Set([...nextRooms[existingIndex].qualityFlags, 'Imported update pending governance review'])],
+        };
       } else {
         nextRooms.push({
           id: `import-${Date.now()}-${previewRow.id}`,
@@ -3241,19 +3926,31 @@ function ImportWizard({
       }
     });
     setRooms(nextRooms);
-    setAttributes(mergeAttributeDefinitions(attributes, createdFields, mappedDictionaryDefinitions));
+    setAttributes(mergeAttributeDefinitions(attributes, importAttributeDefinitions));
   };
 
   const commitImport = async () => {
     if (!requireAuthenticatedEdit('commit imports')) return;
     setIsCommitting(true);
     setCommitError('');
+    setCommitted(false);
+    setCommitResult(null);
+    setCommitProgress({
+      percent: 0,
+      message: 'Starting import.',
+      processedRows: 0,
+      totalRows: preview.filter((row) => row.action !== 'error').length,
+      created: 0,
+      updated: 0,
+      attributeValues: 0,
+    });
     try {
       const result = await persistImportToSupabase({
         filename,
         rows: preview,
         mapping,
-        createdFields: mergeAttributeDefinitions(createdFields, mappedDictionaryDefinitions),
+        createdFields: importAttributeDefinitions,
+        onProgress: setCommitProgress,
       });
       applyImportLocally();
       setCommitResult(result);
@@ -3307,6 +4004,8 @@ function ImportWizard({
                   <select className="input" value={mapping[header] ?? 'ignore'} onChange={(event) => {
                     setMapping({ ...mapping, [header]: event.target.value });
                     setCommitted(false);
+                    setCommitResult(null);
+                    setCommitProgress(null);
                   }}>
                     <optgroup label="Core room fields">
                       {coreRoomFieldOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
@@ -3328,7 +4027,7 @@ function ImportWizard({
               <div>
                 <h3 className="font-bold text-slate-950">Validation Preview</h3>
                 <p className="text-sm text-slate-600">
-                  {preview.filter((row) => row.action === 'create').length} create · {preview.filter((row) => row.action === 'update').length} update · {preview.filter((row) => row.action === 'error').length} errors · {mappedDictionaryDefinitions.length} dictionary fields · {createdFields.length} new fields
+                  {preview.filter((row) => row.action === 'create').length} create · {preview.filter((row) => row.action === 'update').length} update · {preview.filter((row) => row.action === 'error').length} errors · {mappedDictionaryDefinitions.length} dictionary fields · {mappedDynamicDefinitions.length} new fields
                 </p>
               </div>
               <div className="flex flex-wrap gap-2">
@@ -3402,10 +4101,13 @@ function ImportWizard({
                 {commitError}
               </div>
             )}
+            {commitProgress && (
+              <ImportProgressPanel progress={commitProgress} complete={committed} />
+            )}
             <div className="grid gap-4 p-4 md:grid-cols-2 xl:grid-cols-4">
               <MetricCard icon={Plus} label="Rows to create" value={rowsToCreate} detail="New room records" />
               <MetricCard icon={RefreshCcw} label="Rows to update" value={rowsToUpdate} detail="Existing room records" />
-              <MetricCard icon={KeyRound} label="Dictionary fields" value={mappedDictionaryDefinitions.length} detail={mappedDictionaryDefinitions.slice(0, 4).map((field) => field.label).join(', ') || 'None mapped'} />
+              <MetricCard icon={KeyRound} label="New fields" value={mappedDynamicDefinitions.length} detail={mappedDynamicDefinitions.slice(0, 4).map((field) => field.label).join(', ') || 'None'} />
               <MetricCard icon={AlertTriangle} label="Validation errors" value={errorRows.length} detail={errorRows.length ? 'Return to mapping' : 'Ready to commit'} />
             </div>
             <div className="border-t border-slate-200 p-4">
@@ -3423,11 +4125,13 @@ function ImportWizard({
         )}
 
         {committed && (
-          <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-800">
-            {commitResult?.action === 'supabase'
-              ? `Import committed to Supabase. Import job ${commitResult.importJobId} saved ${commitResult.created} created row(s) and ${commitResult.updated} updated row(s).`
-              : 'Import committed to the in-browser MVP dataset. Configure Supabase and sign in as a room data editor or admin to persist imports.'}
-          </div>
+          <ImportCompletionSummary
+            result={commitResult}
+            importedFields={importAttributeDefinitions}
+            newFields={mappedDynamicDefinitions}
+            fallbackCreated={rowsToCreate}
+            fallbackUpdated={rowsToUpdate}
+          />
         )}
       </section>
     </>
@@ -3440,6 +4144,80 @@ function ImportStep({ icon: Icon, title, detail, active, complete }: { icon: typ
       <Icon className={active ? 'text-ecu-teal' : complete ? 'text-emerald-600' : 'text-slate-400'} size={20} />
       <p className="mt-3 font-bold text-slate-950">{title}</p>
       <p className="mt-1 text-sm text-slate-600">{detail}</p>
+    </div>
+  );
+}
+
+function ImportProgressPanel({ progress, complete }: { progress: PersistImportProgress; complete: boolean }) {
+  return (
+    <div className={cn('border-b px-4 py-4 text-sm', complete ? 'border-emerald-200 bg-emerald-50' : 'border-ecu-teal/30 bg-ecu-mint')}>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <p className="font-bold text-slate-950">{complete ? 'Import complete' : 'Import in progress'}</p>
+          <p className="mt-1 text-slate-700">{progress.message}</p>
+        </div>
+        <span className="badge border-white bg-white text-slate-700">
+          {progress.percent}% complete
+        </span>
+      </div>
+      <div className="mt-4 h-2 overflow-hidden rounded-full bg-white">
+        <div
+          className={cn('h-full rounded-full transition-all', complete ? 'bg-emerald-500' : 'bg-ecu-teal')}
+          style={{ width: `${Math.max(progress.percent, complete ? 100 : 4)}%` }}
+        />
+      </div>
+      <div className="mt-3 flex flex-wrap gap-2 text-xs font-semibold text-slate-700">
+        <span>{progress.processedRows.toLocaleString()} of {progress.totalRows.toLocaleString()} rows</span>
+        <span>{progress.created.toLocaleString()} created</span>
+        <span>{progress.updated.toLocaleString()} updated</span>
+        <span>{progress.attributeValues.toLocaleString()} attribute value{progress.attributeValues === 1 ? '' : 's'}</span>
+      </div>
+    </div>
+  );
+}
+
+function ImportCompletionSummary({
+  result,
+  importedFields,
+  newFields,
+  fallbackCreated,
+  fallbackUpdated,
+}: {
+  result: PersistImportResult | null;
+  importedFields: AttributeDefinition[];
+  newFields: AttributeDefinition[];
+  fallbackCreated: number;
+  fallbackUpdated: number;
+}) {
+  const created = result?.created ?? fallbackCreated;
+  const updated = result?.updated ?? fallbackUpdated;
+  const newFieldLabels = result ? result.newFields : newFields.map((field) => field.label);
+  const importedFieldLabels = importedFields.map((field) => field.label);
+
+  return (
+    <div className="rounded-lg border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-900">
+      <div className="flex items-start gap-3">
+        <CheckCircle2 className="mt-0.5 shrink-0 text-emerald-600" size={20} />
+        <div>
+          <p className="font-bold text-emerald-950">
+            Import complete{result?.action === 'supabase' && result.importJobId ? `: ${result.importJobId}` : ''}
+          </p>
+          <p className="mt-1">
+            Imported {created.toLocaleString()} new room{created === 1 ? '' : 's'} and updated {updated.toLocaleString()} existing room{updated === 1 ? '' : 's'}.
+            {result?.attributeValues ? ` Saved ${result.attributeValues.toLocaleString()} dynamic attribute value${result.attributeValues === 1 ? '' : 's'}.` : ''}
+          </p>
+          <div className="mt-3 grid gap-3 md:grid-cols-2">
+            <MiniList
+              title="New fields created"
+              items={newFieldLabels.length ? newFieldLabels : ['No new dynamic fields were created']}
+            />
+            <MiniList
+              title="Imported attribute fields"
+              items={importedFieldLabels.length ? importedFieldLabels.slice(0, 8) : ['No dynamic or dictionary attributes were mapped']}
+            />
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -3518,6 +4296,30 @@ function mergeAttributeDefinitions(...groups: AttributeDefinition[][]) {
   return Array.from(byKey.values());
 }
 
+function getDynamicAttributeDefinitionsFromMapping(
+  mapping: Record<string, string>,
+  rows: Record<string, string>[],
+  existingAttributes: AttributeDefinition[] = [],
+) {
+  return Object.entries(mapping).flatMap(([header, destination]) => {
+    if (destination !== 'create_dynamic_attribute') return [];
+    const key = makeAttributeKey(header);
+    if (!key) return [];
+    const existing = existingAttributes.find((attribute) => attribute.key === key);
+    if (existing) return [existing];
+
+    return [{
+      key,
+      label: titleCase(header),
+      type: inferType(rows.map((row) => row[header])),
+      group: customImportFieldGroup,
+      required: false,
+      visible: true,
+      downstreamSystems: [],
+    }];
+  });
+}
+
 function normalizeAttributeGroup(group?: string) {
   if (!group || group === 'Imported') return customImportFieldGroup;
   return group;
@@ -3533,6 +4335,26 @@ function formatAttributeValue(value: string | number | boolean | string[]) {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
+}
+
+function getVisibleRoomAttributeBadges(room: Room, attributes: AttributeDefinition[], limit = 6) {
+  const definitionsByKey = new Map(attributes.map((attribute) => [attribute.key, attribute]));
+  return Object.entries(room.attributes)
+    .flatMap(([key, value]) => {
+      if (key === finalRoomNameAttributeKey || roomCapacityAttributeKeys.includes(key)) return [];
+      const displayValue = formatAttributeValue(value).trim();
+      if (!displayValue) return [];
+      const definition = definitionsByKey.get(key) ?? roomDataDictionaryByKey.get(key);
+      if (definition?.visible === false) return [];
+      return [{
+        key,
+        label: definition?.label ?? titleCase(key),
+        value: displayValue,
+        group: normalizeAttributeGroup(definition?.group),
+      }];
+    })
+    .sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label))
+    .slice(0, limit);
 }
 
 function isTruthyAttributeValue(value: string | number | boolean | string[] | undefined) {

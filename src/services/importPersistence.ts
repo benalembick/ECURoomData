@@ -9,6 +9,7 @@ export interface PersistImportPayload {
   rows: ImportPreviewRow[];
   mapping: Record<string, string>;
   createdFields: AttributeDefinition[];
+  onProgress?: (progress: PersistImportProgress) => void;
 }
 
 export interface PersistImportResult {
@@ -16,6 +17,18 @@ export interface PersistImportResult {
   importJobId?: string;
   created: number;
   updated: number;
+  attributeValues: number;
+  newFields: string[];
+}
+
+export interface PersistImportProgress {
+  percent: number;
+  message: string;
+  processedRows: number;
+  totalRows: number;
+  created: number;
+  updated: number;
+  attributeValues: number;
 }
 
 interface ReferenceRecord {
@@ -28,11 +41,30 @@ interface ReferenceRecord {
 }
 
 export async function persistImportToSupabase(payload: PersistImportPayload): Promise<PersistImportResult> {
+  const validRows = payload.rows.filter((row) => row.action !== 'error');
+
   if (!supabase) {
+    const demoAttributeValues = countMappedAttributeValues(validRows, payload.mapping);
+    payload.onProgress?.({
+      percent: 100,
+      message: 'Import complete in demo mode.',
+      processedRows: validRows.length,
+      totalRows: validRows.length,
+      created: payload.rows.filter((row) => row.action === 'create').length,
+      updated: payload.rows.filter((row) => row.action === 'update').length,
+      attributeValues: demoAttributeValues,
+    });
+
     return {
       action: 'demo',
       created: payload.rows.filter((row) => row.action === 'create').length,
       updated: payload.rows.filter((row) => row.action === 'update').length,
+      attributeValues: demoAttributeValues,
+      newFields: getDynamicAttributeDefinitionsFromMapping(
+        payload.mapping,
+        validRows.map((row) => row.source),
+        [],
+      ).map((field) => field.label),
     };
   }
 
@@ -41,7 +73,43 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
     throw new Error('Supabase is configured, but no authenticated user is signed in. Sign in with a profile role of room_data_editor or admin before committing imports.');
   }
 
-  const validRows = payload.rows.filter((row) => row.action !== 'error');
+  const importAttributeDefinitions = mergeAttributeDefinitions(
+    payload.createdFields,
+    getDynamicAttributeDefinitionsFromMapping(
+      payload.mapping,
+      validRows.map((row) => row.source),
+      payload.createdFields,
+    ),
+  );
+  const dynamicAttributeKeys = new Set(
+    getDynamicAttributeDefinitionsFromMapping(
+      payload.mapping,
+      validRows.map((row) => row.source),
+      [],
+    ).map((field) => field.key),
+  );
+
+  const reportProgress = (
+    percent: number,
+    message: string,
+    processedRows: number,
+    created: number,
+    updated: number,
+    attributeValues: number,
+  ) => {
+    payload.onProgress?.({
+      percent: Math.min(100, Math.max(0, Math.round(percent))),
+      message,
+      processedRows,
+      totalRows: validRows.length,
+      created,
+      updated,
+      attributeValues,
+    });
+  };
+
+  reportProgress(5, 'Preparing import references.', 0, 0, 0, 0);
+
   const [campuses, buildings, floors, categories, patterns, attributes] = await Promise.all([
     fetchReference('campuses'),
     fetchReference('buildings'),
@@ -64,21 +132,23 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
         create: payload.rows.filter((row) => row.action === 'create').length,
         update: payload.rows.filter((row) => row.action === 'update').length,
         error: payload.rows.filter((row) => row.action === 'error').length,
-        dynamic_fields: payload.createdFields.map((field) => field.key),
+        dynamic_fields: importAttributeDefinitions.map((field) => field.key),
       },
-      created_attribute_keys: payload.createdFields.map((field) => field.key),
+      created_attribute_keys: importAttributeDefinitions.map((field) => field.key),
     })
     .select('id')
     .single();
 
   if (importError) throw new Error(`Could not create import audit job: ${importError.message}`);
+  reportProgress(12, 'Import audit job created.', 0, 0, 0, 0);
 
   const attributeIdByKey = new Map<string, string>();
   attributes.forEach((attribute) => {
     if (attribute.code) attributeIdByKey.set(attribute.code, attribute.id);
   });
 
-  for (const field of payload.createdFields) {
+  const newFields: string[] = [];
+  for (const field of importAttributeDefinitions) {
     const existingId = attributeIdByKey.get(field.key);
     if (existingId) continue;
     const { data, error } = await supabase
@@ -99,7 +169,9 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
 
     if (error) throw new Error(`Could not create dynamic attribute "${field.label}": ${error.message}`);
     attributeIdByKey.set(data.key, data.id);
+    if (dynamicAttributeKeys.has(field.key)) newFields.push(field.label);
   }
+  reportProgress(18, 'Dynamic attributes are ready.', 0, 0, 0, 0);
 
   for (const attribute of attributes) {
     const key = attribute.code;
@@ -113,9 +185,10 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
 
   let created = 0;
   let updated = 0;
+  let attributeValues = 0;
 
-  for (const previewRow of validRows) {
-    const mapped = mapImportSource(previewRow.source, payload.mapping, payload.createdFields);
+  for (const [index, previewRow] of validRows.entries()) {
+    const mapped = mapImportSource(previewRow.source, payload.mapping, importAttributeDefinitions);
     const campus = resolveReference(campuses, mapped.campus) ?? defaultCampus;
     const building = resolveBuilding(buildings, mapped.building, campus?.id) ?? defaultBuilding;
     const floor = resolveFloor(floors, mapped.floor, building?.id);
@@ -153,7 +226,7 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
     if (previewRow.action === 'create') created += 1;
     if (previewRow.action === 'update') updated += 1;
 
-    const attributeValues = Object.entries(mapped.attributes).flatMap(([key, value]) => {
+    const attributeValueRows = Object.entries(mapped.attributes).flatMap(([key, value]) => {
       const attribute_definition_id = attributeIdByKey.get(key);
       if (!attribute_definition_id) return [];
       return [{
@@ -164,12 +237,13 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
       }];
     });
 
-    if (attributeValues.length) {
+    if (attributeValueRows.length) {
       const { error } = await supabase
         .from('room_attribute_values')
-        .upsert(attributeValues, { onConflict: 'room_id,attribute_definition_id' });
+        .upsert(attributeValueRows, { onConflict: 'room_id,attribute_definition_id' });
       if (error) throw new Error(`Could not save attribute values for ${mapped.roomCode}: ${error.message}`);
     }
+    attributeValues += attributeValueRows.length;
 
     const { error: logError } = await supabase
       .from('room_change_log')
@@ -184,7 +258,17 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
       });
 
     if (logError) throw new Error(`Could not write change log for ${mapped.roomCode}: ${logError.message}`);
+    reportProgress(
+      18 + ((index + 1) / Math.max(validRows.length, 1)) * 76,
+      `Imported ${index + 1} of ${validRows.length} row${validRows.length === 1 ? '' : 's'}.`,
+      index + 1,
+      created,
+      updated,
+      attributeValues,
+    );
   }
+
+  reportProgress(96, 'Finalising import audit status.', validRows.length, created, updated, attributeValues);
 
   const { error: completeError } = await supabase
     .from('import_jobs')
@@ -192,12 +276,15 @@ export async function persistImportToSupabase(payload: PersistImportPayload): Pr
     .eq('id', importJob.id);
 
   if (completeError) throw new Error(`Import completed, but the import job could not be marked committed: ${completeError.message}`);
+  reportProgress(100, 'Import complete.', validRows.length, created, updated, attributeValues);
 
   return {
     action: 'supabase',
     importJobId: importJob.id,
     created,
     updated,
+    attributeValues,
+    newFields,
   };
 }
 
@@ -241,6 +328,43 @@ function resolveFloor(records: ReferenceRecord[], value?: string | number, build
 
 function toDatabaseAttributeType(type: AttributeDefinition['type']) {
   return type.replace('-', '_').replace(' ', '_');
+}
+
+function mergeAttributeDefinitions(...groups: AttributeDefinition[][]) {
+  const byKey = new Map<string, AttributeDefinition>();
+  groups.flat().forEach((attribute) => byKey.set(attribute.key, attribute));
+  return Array.from(byKey.values());
+}
+
+function countMappedAttributeValues(rows: ImportPreviewRow[], mapping: Record<string, string>) {
+  return rows.reduce((total, row) => {
+    return total + Object.entries(mapping).filter(([header, destination]) => {
+      return Boolean(row.source[header])
+        && (destination === 'create_dynamic_attribute' || destination.startsWith('attr:'));
+    }).length;
+  }, 0);
+}
+
+function getDynamicAttributeDefinitionsFromMapping(
+  mapping: Record<string, string>,
+  rows: Record<string, string>[],
+  existingFields: AttributeDefinition[] = [],
+) {
+  return Object.entries(mapping).flatMap(([header, destination]) => {
+    if (destination !== 'create_dynamic_attribute') return [];
+    const key = makeAttributeKey(header);
+    if (!key || existingFields.some((field) => field.key === key)) return [];
+
+    return [{
+      key,
+      label: titleCase(header),
+      type: inferType(rows.map((row) => row[header])),
+      group: 'Custom fields',
+      required: false,
+      visible: true,
+      downstreamSystems: [],
+    }];
+  });
 }
 
 function mapImportSource(source: Record<string, string>, mapping: Record<string, string>, dynamicFields: AttributeDefinition[]) {
@@ -311,6 +435,23 @@ function mapImportSource(source: Record<string, string>, mapping: Record<string,
   });
 
   return mapped;
+}
+
+function titleCase(value: string) {
+  return value
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\b\w/g, (character) => character.toUpperCase());
+}
+
+function inferType(values: string[]): AttributeDefinition['type'] {
+  const sample = values.filter(Boolean).slice(0, 10);
+  if (sample.length && sample.every((value) => ['yes', 'no', 'true', 'false', 'y', 'n'].includes(value.toLowerCase()))) return 'boolean';
+  if (sample.length && sample.every((value) => !Number.isNaN(Number(value)))) return 'number';
+  if (sample.length && sample.every((value) => !Number.isNaN(Date.parse(value)))) return 'date';
+  if (sample.some((value) => value.includes(','))) return 'multi-select';
+  return 'text';
 }
 
 function coerceImportValue(value: string, type: AttributeDefinition['type']) {
