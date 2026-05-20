@@ -1,7 +1,7 @@
 import { supabase } from '../lib/supabase';
 import { floorNameFromCode, parseRoomCode } from '../lib/roomCode';
 import { findAttributeDefinitionForHeader, roomDataDictionaryByKey } from '../data/roomDataDictionary';
-import type { AttributeDefinition, Building, Campus, Room, RoomPattern } from '../types';
+import type { AttributeDefinition, AttributeGroup, Building, Campus, Room, RoomPattern } from '../types';
 
 type JsonValue = string | number | boolean | string[];
 
@@ -31,12 +31,22 @@ interface DbAttributeDefinition {
   id: string;
   key: string;
   label: string;
+  description: string | null;
   type: string;
   group_name: string;
   is_required: boolean;
   is_visible: boolean;
   downstream_system_codes: string[] | null;
   options: unknown;
+  updated_at?: string | null;
+}
+
+interface DbAttributeGroup {
+  name: string;
+  description: string | null;
+  sort_order: number | null;
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 interface DbRoomPattern {
@@ -72,6 +82,7 @@ export interface LoadedRoomData {
   buildings: Building[];
   patterns: RoomPattern[];
   attributes: AttributeDefinition[];
+  attributeGroups: AttributeGroup[];
 }
 
 export interface RoomDataLoadProgress {
@@ -85,7 +96,7 @@ export interface RoomDataLoadProgress {
 export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataLoadProgress) => void): Promise<LoadedRoomData | null> {
   if (!supabase) return null;
   const client = supabase;
-  const totalSteps = 7;
+  const totalSteps = 8;
   let completedSteps = 0;
 
   const reportProgress = (message: string, percent: number, loadedRows?: number) => {
@@ -113,7 +124,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     return result;
   };
 
-  const [campusResult, buildingResult, patternResult, attributeResult, roomResult, valueResult, mappingResult] = await Promise.all([
+  const [campusResult, buildingResult, patternResult, attributeGroupResult, attributeResult, roomResult, valueResult, mappingResult] = await Promise.all([
     loadDataset(() => client.from('campuses').select('code,name,address').eq('is_active', true).order('code'), 'campuses'),
     loadDataset(() => client.from('buildings').select('code,name,owner,campuses(code)').eq('is_active', true).order('code'), 'buildings'),
     loadDataset(
@@ -138,6 +149,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
           .order('name'),
       'room patterns',
     ),
+    loadOptionalDataset(() => client.from('room_attribute_groups').select('*').order('sort_order').order('name'), 'attribute groups'),
     loadDataset(() => client.from('room_attribute_definitions').select('*').order('label'), 'attributes'),
     loadDataset(
       () =>
@@ -205,6 +217,13 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     downstreamSystems: pattern.downstream_system_codes ?? [],
   }));
 
+  const attributeGroups: AttributeGroup[] = ((attributeGroupResult.data ?? []) as DbAttributeGroup[]).map((group) => ({
+    name: group.name,
+    description: group.description ?? undefined,
+    sortOrder: group.sort_order ?? undefined,
+    createdAt: group.created_at ?? undefined,
+    updatedAt: group.updated_at ?? undefined,
+  }));
   const dbAttributes = (attributeResult.data ?? []) as DbAttributeDefinition[];
   const attributesById = new Map(dbAttributes.map((attribute) => [attribute.id, attribute]));
   const attributes: AttributeDefinition[] = dbAttributes.map((attribute) => {
@@ -217,7 +236,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     return {
       key: attribute.key,
       label: attribute.label,
-      description: dictionaryDefinition?.description,
+      description: attribute.description ?? dictionaryDefinition?.description,
       sourceField: dictionaryDefinition?.sourceField,
       type: toUiAttributeType(attribute.type),
       group: usesGenericGroup ? dictionaryDefinition?.group ?? groupName ?? 'Custom fields' : groupName,
@@ -225,6 +244,7 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
       visible: attribute.is_visible,
       downstreamSystems: attribute.downstream_system_codes?.length ? attribute.downstream_system_codes : dictionaryDefinition?.downstreamSystems ?? [],
       options: Array.isArray(attribute.options) && attribute.options.length ? attribute.options.map(String) : dictionaryDefinition?.options ?? [],
+      updatedAt: attribute.updated_at ?? undefined,
     };
   });
 
@@ -291,7 +311,20 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
   });
 
   reportProgress(`Loaded ${rooms.length.toLocaleString()} rooms`, 100, rooms.length);
-  return { rooms, campuses, buildings, patterns, attributes };
+  return { rooms, campuses, buildings, patterns, attributes, attributeGroups };
+}
+
+async function loadOptionalDataset<T>(
+  createQuery: () => {
+    range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+  },
+  label: string,
+) {
+  try {
+    return await loadAllRows(createQuery, label);
+  } catch {
+    return { data: [] as T[], error: null };
+  }
 }
 
 async function loadAllRows<T>(

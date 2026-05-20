@@ -42,13 +42,14 @@ import {
   rooms as initialRooms,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, Building, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Room, RoomPattern, TaskStatus, UserProfile } from './types';
+import type { AttributeDefinition, AttributeGroup, Building, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Room, RoomPattern, TaskStatus, UserProfile } from './types';
 import { cn, downloadCsv, titleCase } from './lib/utils';
 import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
 import { persistImportToSupabase, type PersistImportProgress, type PersistImportResult } from './services/importPersistence';
 import { persistBuildingDetails, persistBuildingRemoval, persistCampusDetails, persistCampusMapping, persistCampusRemoval, type CampusMappingProgress } from './services/campusPersistence';
 import { createDataBackup, deleteDataBackup, getBackupOperation, listDataBackups, restoreDataBackup, type BackupOperation, type DataBackupSet } from './services/dataBackups';
+import { createAttributeGroup, deleteAttributeGroup, moveAttributeDefinitionsToGroup, renameAttributeGroup } from './services/fieldManagement';
 import { loadRoomDataFromSupabase, type RoomDataLoadProgress } from './services/roomData';
 import { getCurrentUserProfile, listUserProfiles, saveUserProfile, type SaveUserPayload } from './services/userManagement';
 import {
@@ -65,6 +66,7 @@ type View =
   | 'rooms'
   | 'room-detail'
   | 'admin'
+  | 'data-fields'
   | 'locations'
   | 'patterns'
   | 'rules'
@@ -89,6 +91,7 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Home },
   { id: 'rooms', label: 'Room Search', icon: Search },
   { id: 'admin', label: 'Room Admin', icon: Settings2 },
+  { id: 'data-fields', label: 'Data Fields', icon: Database },
   { id: 'locations', label: 'Campuses', icon: Building2 },
   { id: 'patterns', label: 'Patterns', icon: Layers3 },
   { id: 'rules', label: 'Rules', icon: GitBranch },
@@ -310,6 +313,7 @@ export function App() {
   const [buildingsData, setBuildingsData] = useState<Building[]>(initialBuildings);
   const [roomPatterns, setRoomPatterns] = useState<RoomPattern[]>(initialPatterns);
   const [attributeDefinitions, setAttributeDefinitions] = useState<AttributeDefinition[]>(initialAttributeDefinitions);
+  const [attributeGroups, setAttributeGroups] = useState<AttributeGroup[]>(() => getAttributeGroupsFromDefinitions(initialAttributeDefinitions));
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(initialChangeRequests);
   const [selectedRoomId, setSelectedRoomId] = useState(initialRooms[0].id);
   const [authEmail, setAuthEmail] = useState('');
@@ -330,7 +334,8 @@ export function App() {
   const selectedRoom = rooms.find((room) => room.id === selectedRoomId) ?? rooms[0];
   const canEdit = !isSupabaseConfigured || authProfile?.role === 'room_data_editor' || authProfile?.role === 'admin';
   const canManageUsers = authProfile?.role === 'admin';
-  const visibleNavItems = navItems.filter((item) => !['users', 'backups'].includes(item.id) || canManageUsers);
+  const canManageFieldConfig = !isSupabaseConfigured || canManageUsers;
+  const visibleNavItems = navItems.filter((item) => !['users', 'backups', 'data-fields'].includes(item.id) || (item.id === 'data-fields' ? canManageFieldConfig : canManageUsers));
 
   const refreshRoomData = useCallback(async () => {
     if (!supabase) return;
@@ -348,6 +353,7 @@ export function App() {
         setBuildingsData(loaded.buildings);
         setRoomPatterns(loaded.patterns.length ? loaded.patterns : initialPatterns);
         setAttributeDefinitions(loaded.attributes.length ? loaded.attributes : initialAttributeDefinitions);
+        setAttributeGroups(mergeAttributeGroups(loaded.attributeGroups, getAttributeGroupsFromDefinitions(loaded.attributes)));
         setHasLoadedRoomData(true);
         setSelectedRoomId((currentRoomId) =>
           loaded.rooms.length && !loaded.rooms.some((room) => room.id === currentRoomId) ? loaded.rooms[0].id : currentRoomId,
@@ -431,6 +437,7 @@ export function App() {
     setBuildingsData(initialBuildings);
     setRoomPatterns(initialPatterns);
     setAttributeDefinitions(initialAttributeDefinitions);
+    setAttributeGroups(getAttributeGroupsFromDefinitions(initialAttributeDefinitions));
     setHasLoadedRoomData(false);
     setDataMessage('');
     setView('dashboard');
@@ -563,6 +570,7 @@ export function App() {
           {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
           {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} />}
           {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'data-fields' && canManageFieldConfig && <DataFieldManagement attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} groups={attributeGroups} setGroups={setAttributeGroups} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'rules' && <Rules />}
@@ -1955,6 +1963,7 @@ function Admin({
         return sortDifference || floorDisplayName(a.floor).localeCompare(floorDisplayName(b.floor), undefined, { numeric: true });
       });
   }, [adminRooms]);
+  const groupedAttributeDefinitions = useMemo(() => getGroupedRoomAttributeDefinitions(attributes), [attributes]);
 
   useEffect(() => {
     setExpandedFloors((current) => {
@@ -2026,13 +2035,14 @@ function Admin({
   const addAttribute = () => {
     if (!requireAuthenticatedEdit('add room attributes')) return;
     if (!newAttribute.key || !newAttribute.label) return;
+    const group = normalizeAttributeGroup(newAttribute.group);
     setAttributes([
       ...attributes,
       {
         key: newAttribute.key.trim().toLowerCase().replace(/\s+/g, '_'),
         label: newAttribute.label,
         type: newAttribute.type as AttributeDefinition['type'],
-        group: newAttribute.group,
+        group,
         required: false,
         visible: true,
         downstreamSystems: [],
@@ -2207,14 +2217,24 @@ function Admin({
 
           <div className="panel rounded-lg">
             <SectionTitle icon={KeyRound} title="Configurable Attributes" />
-            <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">
-              {attributes.map((attribute) => (
-                <AttributeEditor
-                  key={attribute.key}
-                  attribute={attribute}
-                  value={draft.attributes[attribute.key]}
-                  onChange={(value) => updateDraftAttribute(attribute, value)}
-                />
+            <div className="space-y-5 p-4">
+              {groupedAttributeDefinitions.map(([group, groupAttributes]) => (
+                <section key={group}>
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <h4 className="text-sm font-bold uppercase text-slate-700">{group}</h4>
+                    <span className="badge border-slate-200 bg-slate-50 text-slate-600">{groupAttributes.length} fields</span>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {groupAttributes.map((attribute) => (
+                      <AttributeEditor
+                        key={attribute.key}
+                        attribute={attribute}
+                        value={draft.attributes[attribute.key]}
+                        onChange={(value) => updateDraftAttribute(attribute, value)}
+                      />
+                    ))}
+                  </div>
+                </section>
               ))}
             </div>
             <div className="border-t border-slate-200 p-4">
@@ -2229,6 +2249,303 @@ function Admin({
               </div>
             </div>
           </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function DataFieldManagement({
+  attributes,
+  setAttributes,
+  groups,
+  setGroups,
+  requireAuthenticatedEdit,
+}: {
+  attributes: AttributeDefinition[];
+  setAttributes: (attributes: AttributeDefinition[]) => void;
+  groups: AttributeGroup[];
+  setGroups: (groups: AttributeGroup[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
+  const allAttributes = useMemo(() => getRoomAttributeDefinitions(attributes), [attributes]);
+  const groupOptions = useMemo(() => mergeAttributeGroups(groups, getAttributeGroupsFromDefinitions(allAttributes)), [allAttributes, groups]);
+  const [selectedGroup, setSelectedGroup] = useState(() => groupOptions.find((group) => group.name === 'BOOKING DATA')?.name ?? groupOptions[0]?.name ?? '');
+  const [newGroupName, setNewGroupName] = useState('');
+  const [renameGroupName, setRenameGroupName] = useState('');
+  const [fieldSearch, setFieldSearch] = useState('');
+  const [selectedFieldKeys, setSelectedFieldKeys] = useState<string[]>([]);
+  const [bulkMoveGroup, setBulkMoveGroup] = useState('');
+  const [toast, setToast] = useState('');
+  const [error, setError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    allAttributes.forEach((attribute) => counts.set(attribute.group, (counts.get(attribute.group) ?? 0) + 1));
+    return counts;
+  }, [allAttributes]);
+
+  const selectedGroupFields = useMemo(
+    () => allAttributes.filter((attribute) => attribute.group === selectedGroup),
+    [allAttributes, selectedGroup],
+  );
+  const filteredFields = useMemo(() => {
+    const search = fieldSearch.trim().toLowerCase();
+    if (!search) return selectedGroupFields;
+    return selectedGroupFields.filter((field) => [field.label, field.key, field.type, field.group].join(' ').toLowerCase().includes(search));
+  }, [fieldSearch, selectedGroupFields]);
+  const recentFieldCount = allAttributes.filter((field) => isRecentDate(field.updatedAt)).length;
+  const unassignedFieldCount = allAttributes.filter((field) => normalizeAttributeGroup(field.group) === customImportFieldGroup).length;
+  const selectedFields = allAttributes.filter((field) => selectedFieldKeys.includes(field.key));
+
+  useEffect(() => {
+    if (groupOptions.some((group) => group.name === selectedGroup)) return;
+    setSelectedGroup(groupOptions.find((group) => group.name === 'BOOKING DATA')?.name ?? groupOptions[0]?.name ?? '');
+  }, [groupOptions, selectedGroup]);
+
+  useEffect(() => {
+    setSelectedFieldKeys([]);
+    setBulkMoveGroup('');
+  }, [selectedGroup]);
+
+  const showToast = (message: string) => {
+    setToast(message);
+    setError('');
+  };
+
+  const addGroup = async () => {
+    if (!requireAuthenticatedEdit('create a data field group')) return;
+    const name = normalizeAttributeGroup(newGroupName.trim());
+    if (!name) return;
+    setIsSaving(true);
+    try {
+      const savedGroup = await createAttributeGroup(name);
+      setGroups(mergeAttributeGroups(groups, [savedGroup]));
+      setSelectedGroup(savedGroup.name);
+      setNewGroupName('');
+      showToast(`${savedGroup.name} was added.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not add the group.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const renameGroup = async () => {
+    if (!requireAuthenticatedEdit('rename a data field group')) return;
+    const nextName = normalizeAttributeGroup(renameGroupName.trim());
+    if (!selectedGroup || !nextName || nextName === selectedGroup) return;
+    setIsSaving(true);
+    try {
+      const fieldsToMove = allAttributes.filter((field) => field.group === selectedGroup);
+      const savedGroup = await renameAttributeGroup(selectedGroup, nextName, fieldsToMove);
+      const updatedFields = fieldsToMove.map((field) => ({ ...field, group: nextName, updatedAt: savedGroup.updatedAt ?? new Date().toISOString() }));
+      setAttributes(mergeAttributeDefinitions(attributes, updatedFields));
+      setGroups(mergeAttributeGroups(groups.filter((group) => group.name !== selectedGroup), [savedGroup]));
+      setSelectedGroup(nextName);
+      setRenameGroupName('');
+      showToast(`${selectedGroup} was renamed to ${nextName}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not rename the group.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const removeGroup = async (groupName: string) => {
+    if (!requireAuthenticatedEdit('delete a data field group')) return;
+    const fieldsInGroup = allAttributes.filter((field) => field.group === groupName);
+    if (fieldsInGroup.length) {
+      setError(`Move ${fieldsInGroup.length} field${fieldsInGroup.length === 1 ? '' : 's'} out of ${groupName} before deleting it.`);
+      return;
+    }
+    if (!window.confirm(`Delete the empty data field group "${groupName}"?`)) return;
+    setIsSaving(true);
+    try {
+      await deleteAttributeGroup(groupName, fieldsInGroup);
+      const nextGroups = groups.filter((group) => group.name !== groupName);
+      setGroups(nextGroups);
+      if (selectedGroup === groupName) setSelectedGroup(nextGroups[0]?.name ?? '');
+      showToast(`${groupName} was deleted.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not delete the group.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const moveFields = async (fields: AttributeDefinition[], groupName: string) => {
+    if (!fields.length || !groupName || fields.every((field) => field.group === groupName)) return;
+    if (!requireAuthenticatedEdit('move data fields between groups')) return;
+    setIsSaving(true);
+    try {
+      const updatedFields = await moveAttributeDefinitionsToGroup(fields, groupName);
+      setAttributes(mergeAttributeDefinitions(attributes, updatedFields));
+      setGroups(mergeAttributeGroups(groups, [{ name: groupName, updatedAt: new Date().toISOString() }]));
+      setSelectedFieldKeys((current) => current.filter((key) => !fields.some((field) => field.key === key)));
+      showToast(`${fields.length} field${fields.length === 1 ? '' : 's'} moved to ${groupName}.`);
+    } catch (saveError) {
+      setError(saveError instanceof Error ? saveError.message : 'Could not move the selected fields.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  const toggleSelectedField = (fieldKey: string) => {
+    setSelectedFieldKeys((current) => (
+      current.includes(fieldKey) ? current.filter((key) => key !== fieldKey) : [...current, fieldKey]
+    ));
+  };
+
+  const allFilteredSelected = filteredFields.length > 0 && filteredFields.every((field) => selectedFieldKeys.includes(field.key));
+  const toggleAllFilteredFields = () => {
+    setSelectedFieldKeys((current) => {
+      const filteredKeys = filteredFields.map((field) => field.key);
+      if (allFilteredSelected) return current.filter((key) => !filteredKeys.includes(key));
+      return [...new Set([...current, ...filteredKeys])];
+    });
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Data Field Management"
+        description="Manage room data fields and their groupings without editing individual room records."
+      />
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={KeyRound} label="Total fields" value={allAttributes.length} detail="Dictionary and configured fields" />
+        <MetricCard icon={Database} label="Total groups" value={groupOptions.length} detail="Available field groupings" />
+        <MetricCard icon={AlertTriangle} label="Unassigned fields" value={unassignedFieldCount} detail="Fields in Custom fields" />
+        <MetricCard icon={History} label="Recently updated" value={recentFieldCount} detail="Updated in the last 7 days" />
+      </section>
+
+      {(toast || error) && (
+        <div className={cn('mt-5 rounded-md border px-4 py-3 text-sm', error ? 'border-red-200 bg-red-50 text-red-700' : 'border-emerald-200 bg-emerald-50 text-emerald-700')}>
+          {error || toast}
+        </div>
+      )}
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-[360px_1fr]">
+        <div className="panel rounded-lg">
+          <SectionTitle icon={Layers3} title="Groups" />
+          <div className="space-y-3 border-b border-slate-200 p-4">
+            <label className="block">
+              <span className="label">New group</span>
+              <div className="mt-1 flex gap-2">
+                <input className="input" value={newGroupName} onChange={(event) => setNewGroupName(event.target.value)} placeholder="Group name" />
+                <button className="btn-primary shrink-0" disabled={isSaving || !newGroupName.trim()} onClick={addGroup}>
+                  <Plus size={16} /> Add
+                </button>
+              </div>
+            </label>
+            <label className="block">
+              <span className="label">Rename selected group</span>
+              <div className="mt-1 flex gap-2">
+                <input className="input" value={renameGroupName} onChange={(event) => setRenameGroupName(event.target.value)} placeholder={selectedGroup || 'Select a group'} />
+                <button className="btn-secondary shrink-0" disabled={isSaving || !renameGroupName.trim() || !selectedGroup} onClick={renameGroup}>
+                  <Pencil size={16} /> Rename
+                </button>
+              </div>
+            </label>
+          </div>
+          <div className="max-h-[620px] space-y-2 overflow-auto p-3">
+            {groupOptions.length ? groupOptions.map((group) => {
+              const count = groupCounts.get(group.name) ?? 0;
+              const isSelected = selectedGroup === group.name;
+              return (
+                <div key={group.name} className={cn('rounded-md border p-3', isSelected ? 'border-ecu-teal bg-ecu-mint' : 'border-slate-200 bg-white')}>
+                  <button className="block w-full text-left" onClick={() => setSelectedGroup(group.name)}>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-bold text-slate-950">{group.name}</p>
+                        <p className="mt-1 text-sm text-slate-600">{count} field{count === 1 ? '' : 's'}</p>
+                      </div>
+                      <span className="badge border-slate-200 bg-white text-slate-600">{count}</span>
+                    </div>
+                  </button>
+                  <button
+                    className="mt-3 inline-flex items-center gap-1 text-xs font-semibold text-red-700 disabled:text-slate-400"
+                    disabled={isSaving || count > 0}
+                    onClick={() => void removeGroup(group.name)}
+                    title={count > 0 ? 'Move fields out before deleting this group' : 'Delete group'}
+                  >
+                    <Trash2 size={14} /> Delete
+                  </button>
+                </div>
+              );
+            }) : (
+              <div className="rounded-md border border-dashed border-slate-300 p-5 text-sm text-slate-600">No field groups found.</div>
+            )}
+          </div>
+        </div>
+
+        <div className="panel rounded-lg">
+          <div className="flex flex-col gap-4 border-b border-slate-200 p-4 lg:flex-row lg:items-end lg:justify-between">
+            <div>
+              <h3 className="text-lg font-bold text-slate-950">{selectedGroup || 'Select a group'}</h3>
+              <p className="mt-1 text-sm text-slate-600">{selectedGroupFields.length} field{selectedGroupFields.length === 1 ? '' : 's'} in this group.</p>
+            </div>
+            <div className="grid gap-2 sm:grid-cols-[minmax(220px,1fr)_220px_auto]">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 text-slate-400" size={18} />
+                <input className="input pl-10" value={fieldSearch} onChange={(event) => setFieldSearch(event.target.value)} placeholder="Search fields" />
+              </div>
+              <select className="input" value={bulkMoveGroup} onChange={(event) => setBulkMoveGroup(event.target.value)}>
+                <option value="">Bulk move to...</option>
+                {groupOptions.filter((group) => group.name !== selectedGroup).map((group) => (
+                  <option key={group.name} value={group.name}>{group.name}</option>
+                ))}
+              </select>
+              <button className="btn-primary" disabled={isSaving || !bulkMoveGroup || !selectedFields.length} onClick={() => void moveFields(selectedFields, bulkMoveGroup)}>
+                <Upload size={16} /> Move {selectedFields.length || ''}
+              </button>
+            </div>
+          </div>
+
+          {isSaving && <LoadingPanelMessage label="Saving field management changes" />}
+          {!isSaving && (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[860px] text-left text-sm">
+                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                  <tr>
+                    <th className="w-12 px-4 py-3">
+                      <input type="checkbox" className="h-4 w-4 accent-ecu-teal" checked={allFilteredSelected} onChange={toggleAllFilteredFields} />
+                    </th>
+                    <th className="px-4 py-3">Field</th>
+                    <th className="px-4 py-3">Database key</th>
+                    <th className="px-4 py-3">Type</th>
+                    <th className="px-4 py-3">Current grouping</th>
+                    <th className="px-4 py-3">Move field</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-100">
+                  {filteredFields.map((field) => (
+                    <tr key={field.key}>
+                      <td className="px-4 py-3">
+                        <input type="checkbox" className="h-4 w-4 accent-ecu-teal" checked={selectedFieldKeys.includes(field.key)} onChange={() => toggleSelectedField(field.key)} />
+                      </td>
+                      <td className="px-4 py-3 font-semibold text-slate-950">{field.label}</td>
+                      <td className="px-4 py-3 font-mono text-xs text-slate-600">{field.key}</td>
+                      <td className="px-4 py-3 text-slate-700">{field.type}</td>
+                      <td className="px-4 py-3 text-slate-700">{field.group}</td>
+                      <td className="px-4 py-3">
+                        <select className="input h-9" value={field.group} onChange={(event) => void moveFields([field], event.target.value)}>
+                          {groupOptions.map((group) => <option key={group.name} value={group.name}>{group.name}</option>)}
+                        </select>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              {!filteredFields.length && (
+                <div className="p-8 text-center text-sm text-slate-600">
+                  {fieldSearch ? 'No fields match the current search.' : 'This group has no fields yet. Move fields into it from another group.'}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       </section>
     </>
@@ -4335,6 +4652,63 @@ function formatAttributeValue(value: string | number | boolean | string[]) {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
+}
+
+function getRoomAttributeDefinitions(attributes: AttributeDefinition[]) {
+  const byKey = new Map([...roomDataDictionaryDefinitions, ...attributes].map((attribute) => [attribute.key, attribute]));
+  return Array.from(byKey.values())
+    .map((attribute) => {
+      const dictionaryDefinition = roomDataDictionaryByKey.get(attribute.key)
+        ?? findAttributeDefinitionForHeader(attribute.label)
+        ?? findAttributeDefinitionForHeader(attribute.key);
+      const loadedGroup = normalizeAttributeGroup(attribute.group);
+      const group = loadedGroup === customImportFieldGroup
+        ? dictionaryDefinition?.group ?? loadedGroup
+        : loadedGroup;
+
+      return {
+        ...dictionaryDefinition,
+        ...attribute,
+        description: attribute.description ?? dictionaryDefinition?.description,
+        group: normalizeAttributeGroup(group),
+      };
+    })
+    .sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label));
+}
+
+function getGroupedRoomAttributeDefinitions(attributes: AttributeDefinition[]) {
+  return getRoomAttributeDefinitions(attributes).reduce<[string, AttributeDefinition[]][]>((groups, attribute) => {
+    const existingGroup = groups.find(([group]) => group === attribute.group);
+    if (existingGroup) existingGroup[1].push(attribute);
+    else groups.push([attribute.group, [attribute]]);
+    return groups;
+  }, []);
+}
+
+function getAttributeGroupOptions(attributes: AttributeDefinition[], extraGroups: string[] = []) {
+  return [...new Set([...attributes.map((attribute) => normalizeAttributeGroup(attribute.group)), ...extraGroups.map(normalizeAttributeGroup)].filter(Boolean))]
+    .sort(compareRoomDataDictionaryGroups);
+}
+
+function getAttributeGroupsFromDefinitions(attributes: AttributeDefinition[]): AttributeGroup[] {
+  return getAttributeGroupOptions(attributes).map((name, index) => ({ name, sortOrder: index }));
+}
+
+function mergeAttributeGroups(...groups: AttributeGroup[][]) {
+  const byName = new Map<string, AttributeGroup>();
+  groups.flat().forEach((group) => {
+    const name = normalizeAttributeGroup(group.name);
+    if (!name) return;
+    byName.set(name, { ...byName.get(name), ...group, name });
+  });
+  return Array.from(byName.values()).sort((a, b) => compareRoomDataDictionaryGroups(a.name, b.name));
+}
+
+function isRecentDate(value?: string) {
+  if (!value) return false;
+  const timestamp = new Date(value).getTime();
+  if (!Number.isFinite(timestamp)) return false;
+  return Date.now() - timestamp <= 7 * 24 * 60 * 60 * 1000;
 }
 
 function getVisibleRoomAttributeBadges(room: Room, attributes: AttributeDefinition[], limit = 6) {

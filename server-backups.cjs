@@ -6,6 +6,7 @@ const BACKUP_TABLES = [
   'room_categories',
   'room_patterns',
   'rooms',
+  'room_attribute_groups',
   'room_attribute_definitions',
   'room_attribute_values',
   'system_mappings',

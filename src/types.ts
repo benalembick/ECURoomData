@@ -86,6 +86,15 @@ export interface AttributeDefinition {
   visible: boolean;
   downstreamSystems: string[];
   options?: string[];
+  updatedAt?: string;
+}
+
+export interface AttributeGroup {
+  name: string;
+  description?: string;
+  sortOrder?: number;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface Room {
