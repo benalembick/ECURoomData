@@ -6,8 +6,10 @@ import {
   Archive,
   Building2,
   CheckCircle2,
+  ChevronDown,
   ChevronRight,
   ClipboardCheck,
+  Copy,
   Database,
   Download,
   FileSpreadsheet,
@@ -568,7 +570,7 @@ export function App() {
         <main className="p-4 sm:p-6 lg:p-8">
           {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} openSummarySearch={openSummarySearch} roomDataLoading={roomDataLoading} />}
           {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
-          {view === 'room-detail' && <RoomDetail room={selectedRoom} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} />}
+          {view === 'room-detail' && <RoomDetail room={selectedRoom} rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'data-fields' && canManageFieldConfig && <DataFieldManagement attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} groups={attributeGroups} setGroups={setAttributeGroups} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
@@ -1713,144 +1715,466 @@ function Fact({ label, value }: { label: string; value: string | number | boolea
   );
 }
 
-function RoomDetail({ room, attributes, openRoomAdmin }: { room: Room; attributes: AttributeDefinition[]; openRoomAdmin: (roomId: string) => void }) {
-  const roomMappings = mappings.filter((mapping) => mapping.roomId === room.id);
-  const attributeRows = Object.entries(room.attributes).map(([key, value]) => {
-    const loadedDefinition = attributes.find((attribute) => attribute.key === key);
-    const dictionaryDefinition = roomDataDictionaryByKey.get(key)
-      ?? (loadedDefinition ? findAttributeDefinitionForHeader(loadedDefinition.label) : undefined)
-      ?? findAttributeDefinitionForHeader(key);
-    const loadedGroup = normalizeAttributeGroup(loadedDefinition?.group);
-    const definition = loadedDefinition ?? dictionaryDefinition;
-    const group = loadedGroup === customImportFieldGroup ? dictionaryDefinition?.group ?? loadedGroup : loadedGroup;
+type RoomProfileFieldRow = {
+  key: string;
+  tab: string;
+  group: string;
+  label: string;
+  value: string;
+  rawValue: string | number | boolean | string[];
+  description: string;
+  sourceSystem: string;
+  type: AttributeDefinition['type'];
+  required: boolean;
+  updatedAt?: string;
+};
 
-    return {
-      key,
-      group: normalizeAttributeGroup(group),
-      label: definition?.label ?? titleCase(key),
-      value: formatAttributeValue(value),
-      description: loadedDefinition?.description ?? dictionaryDefinition?.description,
-    };
-  }).sort((a, b) => compareRoomDataDictionaryGroups(a.group, b.group) || a.label.localeCompare(b.label));
-  const groupedAttributeRows = attributeRows.reduce<Record<string, typeof attributeRows>>((groups, row) => {
-    groups[row.group] = [...(groups[row.group] ?? []), row];
+const roomProfileTabs = ['Overview', 'Identification', 'Timetabling', 'Technology', 'Booking', 'Governance', 'History'];
+const coreRoomProfileGroup = 'Core Room Details';
+
+function RoomDetail({ room, rooms, setRooms, attributes, openRoomAdmin, requireAuthenticatedEdit }: {
+  room: Room;
+  rooms: Room[];
+  setRooms: (rooms: Room[]) => void;
+  attributes: AttributeDefinition[];
+  openRoomAdmin: (roomId: string) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
+  const roomMappings = mappings.filter((mapping) => mapping.roomId === room.id);
+  const [selectedTab, setSelectedTab] = useState('Overview');
+  const [selectedFieldKey, setSelectedFieldKey] = useState('');
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(() => new Set([coreRoomProfileGroup]));
+  const [fieldSearch, setFieldSearch] = useState('');
+  const [sourceFilter, setSourceFilter] = useState('All sources');
+  const [requiredOnly, setRequiredOnly] = useState(false);
+  const [recentOnly, setRecentOnly] = useState(false);
+  const [emptyOnly, setEmptyOnly] = useState(false);
+  const [editingKey, setEditingKey] = useState('');
+  const [editingValue, setEditingValue] = useState('');
+  const [toast, setToast] = useState('');
+  const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const attributeDefinitions = useMemo(() => getRoomAttributeDefinitions(attributes), [attributes]);
+  const attributeRows = useMemo(() => buildRoomProfileFields(room, attributeDefinitions), [attributeDefinitions, room]);
+  const selectedField = attributeRows.find((row) => row.key === selectedFieldKey) ?? attributeRows[0];
+  const sourceOptions = useMemo(() => ['All sources', ...Array.from(new Set(attributeRows.map((row) => row.sourceSystem))).sort()], [attributeRows]);
+  const visibleRows = useMemo(() => {
+    const search = fieldSearch.trim().toLowerCase();
+    return attributeRows
+      .filter((row) => row.tab === selectedTab || selectedTab === 'History')
+      .filter((row) => sourceFilter === 'All sources' || row.sourceSystem === sourceFilter)
+      .filter((row) => !requiredOnly || row.required)
+      .filter((row) => !recentOnly || isRecentDate(row.updatedAt))
+      .filter((row) => !emptyOnly || !row.value.trim())
+      .filter((row) => !search || [row.label, row.value, row.description, row.sourceSystem, row.group].join(' ').toLowerCase().includes(search));
+  }, [attributeRows, emptyOnly, fieldSearch, recentOnly, requiredOnly, selectedTab, sourceFilter]);
+  const groupedAttributeEntries = useMemo(() => visibleRows.reduce<[string, RoomProfileFieldRow[]][]>((groups, row) => {
+    const existing = groups.find(([group]) => group === row.group);
+    if (existing) existing[1].push(row);
+    else groups.push([row.group, [row]]);
     return groups;
-  }, {});
-  const groupedAttributeEntries = Object.entries(groupedAttributeRows).sort(([a], [b]) => compareRoomDataDictionaryGroups(a, b));
+  }, []), [visibleRows]);
+  const statusBadges = [room.isArchived ? 'Archived' : 'Active', room.isTeaching ? 'Timetabled' : '', room.isBookable ? 'Bookable' : ''].filter(Boolean);
+  const visibleGroupNames = useMemo(() => groupedAttributeEntries.map(([group]) => group), [groupedAttributeEntries]);
+
+  useEffect(() => {
+    if (attributeRows.length && !attributeRows.some((row) => row.key === selectedFieldKey)) setSelectedFieldKey(attributeRows[0].key);
+  }, [attributeRows, selectedFieldKey]);
+
+  useEffect(() => {
+    setEditingKey('');
+    setEditingValue('');
+    setIsDetailOpen(false);
+  }, [room.id]);
+
+  useEffect(() => {
+    setExpandedGroups(new Set(visibleGroupNames));
+  }, [selectedTab, visibleGroupNames]);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timeout = window.setTimeout(() => setToast(''), 2200);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  const toggleGroup = (group: string) => {
+    setExpandedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(group)) next.delete(group);
+      else next.add(group);
+      return next;
+    });
+  };
+  const setAllGroupsExpanded = (isExpanded: boolean) => {
+    setExpandedGroups(isExpanded ? new Set(visibleGroupNames) : new Set());
+  };
+  const selectField = (fieldKey: string) => {
+    setSelectedFieldKey(fieldKey);
+    setIsDetailOpen(true);
+  };
+  const startEdit = (field: RoomProfileFieldRow) => {
+    if (!requireAuthenticatedEdit('edit room profile fields')) return;
+    setSelectedFieldKey(field.key);
+    setEditingKey(field.key);
+    setEditingValue(field.value);
+    setIsDetailOpen(true);
+  };
+  const cancelEdit = () => {
+    setEditingKey('');
+    setEditingValue('');
+  };
+  const saveField = (field: RoomProfileFieldRow) => {
+    if (!requireAuthenticatedEdit('save room profile field changes')) return;
+    const nextValue = coerceEditedAttributeValue(editingValue, field.type, field.rawValue);
+    const nextRoom: Room = {
+      ...room,
+      roomCode: field.key === 'room_code' && typeof nextValue === 'string' ? nextValue : room.roomCode,
+      name: (field.key === 'room_name' || field.key === finalRoomNameAttributeKey) && typeof nextValue === 'string' ? nextValue : room.name,
+      campus: field.key === 'campus' && typeof nextValue === 'string' ? nextValue : room.campus,
+      building: field.key === 'building' && typeof nextValue === 'string' ? nextValue : room.building,
+      floor: field.key === 'floor' && typeof nextValue === 'string' ? nextValue : room.floor,
+      type: field.key === 'room_type' && typeof nextValue === 'string' ? nextValue : room.type,
+      owner: field.key === 'assigned_department' && typeof nextValue === 'string' ? nextValue : room.owner,
+      capacity: (field.key === 'capacity' || roomCapacityAttributeKeys.includes(field.key)) ? Number(nextValue) || room.capacity : room.capacity,
+      attributes: {
+        ...room.attributes,
+        [field.key]: nextValue,
+        ...((field.key === 'room_name' || field.key === finalRoomNameAttributeKey) && typeof nextValue === 'string' ? { [finalRoomNameAttributeKey]: nextValue } : {}),
+      },
+      qualityFlags: [...new Set([...room.qualityFlags, 'Unsaved admin edits'])],
+    };
+    setRooms(rooms.map((item) => (item.id === room.id ? nextRoom : item)));
+    setEditingKey('');
+    setEditingValue('');
+    setToast(`${field.label} updated.`);
+  };
+  const copyFieldValue = async (field: RoomProfileFieldRow) => {
+    try {
+      await navigator.clipboard.writeText(field.value);
+      setToast('Copied');
+    } catch {
+      setToast('Could not copy value');
+    }
+  };
 
   return (
     <>
       <PageHeader
-        title={roomDisplayName(room)}
-        description="A single governed room profile separating physical asset facts from booking, access, integration, and audit information."
+        title="Room Profile"
+        description={`${room.roomCode} / ${getRoomFinalName(room) || room.name || 'Unnamed room'}`}
         action={<button className="btn-primary" onClick={() => openRoomAdmin(room.id)}><Pencil size={16} /> Edit in Room Admin</button>}
       />
-      <section className="grid gap-6 xl:grid-cols-[1fr_360px]">
-        <div className="space-y-6">
-          <div className="panel rounded-lg p-5">
-            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-              <Fact label="Campus" value={room.campus} />
-              <Fact label="Building" value={room.building} />
-              <Fact label="Floor" value={room.floor} />
+      <section className="space-y-5">
+        <div className="panel rounded-lg p-5">
+          <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2 text-sm font-semibold text-slate-500">
+                <span>Room Search</span>
+                <ChevronRight size={15} />
+                <span>{room.roomCode}</span>
+              </div>
+              <h2 className="mt-2 text-2xl font-bold text-slate-950">{getRoomFinalName(room) || room.name || room.roomCode}</h2>
+              <p className="mt-1 text-sm text-slate-600">{room.owner || 'Unknown department'} / {room.category || 'No sub department provided'}</p>
+              <div className="mt-4 flex flex-wrap gap-2">
+                {statusBadges.map((status) => <StatusBadge key={status} status={status} />)}
+                {getActiveRoomQualityFlags(room).map((flag) => <span key={flag} className="badge border-amber-200 bg-amber-50 text-amber-700">{flag}</span>)}
+              </div>
+            </div>
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:min-w-[620px]">
               <Fact label="Capacity" value={getRoomCapacityDisplay(room, attributes)} />
-              <Fact label="Category" value={room.category} />
-              <Fact label="Pattern" value={room.pattern} />
-              <Fact label="Owner" value={room.owner} />
-              <Fact label="Archived" value={room.isArchived ? 'Yes' : 'No'} />
-            </div>
-          </div>
-
-          <TwoColumnPanel
-            leftTitle="Physical Room Information"
-            rightTitle="Booking and Access Information"
-            left={<p className="text-sm leading-6 text-slate-700">{room.physicalNotes}</p>}
-            right={<p className="text-sm leading-6 text-slate-700">{room.bookingNotes}</p>}
-          />
-
-          <div className="panel rounded-lg">
-            <SectionTitle icon={Database} title="Data Dictionary Fields" />
-            <div className="space-y-4 p-4">
-              {groupedAttributeEntries.length ? groupedAttributeEntries.map(([group, rows]) => (
-                <section key={group}>
-                  <div className="mb-2 flex items-center justify-between gap-3">
-                    <h4 className="text-sm font-bold uppercase text-slate-700">{group}</h4>
-                    <span className="badge border-slate-200 bg-slate-50 text-slate-600">{rows.length} populated</span>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
-                    {rows.map((row) => (
-                      <div key={row.key} className="rounded-md border border-slate-200 p-3">
-                        <p className="label">{row.label}</p>
-                        <p className="mt-1 break-words font-semibold text-slate-800">{row.value}</p>
-                        {row.description && <p className="mt-2 text-xs leading-5 text-slate-500">{row.description}</p>}
-                      </div>
-                    ))}
-                  </div>
-                </section>
-              )) : (
-                <p className="text-sm text-slate-600">No dictionary attributes have been captured for this room yet.</p>
-              )}
-            </div>
-          </div>
-
-          <div className="panel rounded-lg">
-            <SectionTitle icon={GitBranch} title="Downstream System Mappings" />
-            <div className="overflow-x-auto">
-              <table className="w-full min-w-[720px] text-left text-sm">
-                <thead className="bg-slate-50 text-xs uppercase text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3">System</th>
-                    <th className="px-4 py-3">External ID</th>
-                    <th className="px-4 py-3">Status</th>
-                    <th className="px-4 py-3">Last verified</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200">
-                  {roomMappings.map((mapping) => (
-                    <tr key={mapping.systemName}>
-                      <td className="px-4 py-3 font-semibold text-slate-900">{mapping.systemName}</td>
-                      <td className="px-4 py-3 text-slate-600">{mapping.externalId}</td>
-                      <td className="px-4 py-3"><StatusBadge status={mapping.status} /></td>
-                      <td className="px-4 py-3 text-slate-600">{mapping.lastVerified}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <Fact label="Floor" value={room.floor} />
+              <Fact label="Building" value={room.building} />
+              <Fact label="Campus" value={room.campus} />
+              <Fact label="Room ID" value={room.roomCode} />
             </div>
           </div>
         </div>
 
-        <aside className="space-y-6">
-          <div className="panel rounded-lg">
-            <SectionTitle icon={ImageIcon} title="Floorplan" />
-            <div className="p-4">
-              <FloorplanPreview imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} />
+        <div className="panel rounded-lg">
+          <div className="border-b border-slate-200 px-4 pt-4">
+            <div className="flex gap-2 overflow-x-auto" role="tablist" aria-label="Room profile sections">
+              {roomProfileTabs.map((tab) => (
+                <button
+                  key={tab}
+                  role="tab"
+                  aria-selected={selectedTab === tab}
+                  className={cn('whitespace-nowrap border-b-2 px-3 pb-3 text-sm font-bold transition', selectedTab === tab ? 'border-ecu-teal text-ecu-black' : 'border-transparent text-slate-500 hover:text-slate-900')}
+                  onClick={() => setSelectedTab(tab)}
+                >
+                  {tab}
+                </button>
+              ))}
             </div>
           </div>
-          <div className="panel rounded-lg p-4">
-            <h3 className="font-bold text-slate-950">Capabilities</h3>
-            <div className="mt-3 flex flex-wrap gap-2">
-              {room.capabilities.map((capability) => <span key={capability} className="badge border-slate-200 bg-slate-50 text-slate-700">{capability}</span>)}
+          <div className="grid xl:grid-cols-[minmax(0,1fr)_360px]">
+            <div className="min-w-0 border-slate-200 xl:border-r">
+              <div className="space-y-3 border-b border-slate-200 p-4">
+                <label className="relative block">
+                  <span className="sr-only">Search room profile fields</span>
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                  <input className="input pl-9" value={fieldSearch} onChange={(event) => setFieldSearch(event.target.value)} placeholder="Search label, value, description or source" />
+                </label>
+                <div className="flex flex-wrap items-center gap-2">
+                  <select className="input max-w-xs" value={sourceFilter} onChange={(event) => setSourceFilter(event.target.value)} aria-label="Filter by source system">
+                    {sourceOptions.map((source) => <option key={source}>{source}</option>)}
+                  </select>
+                  <Toggle label="Required" checked={requiredOnly} onChange={setRequiredOnly} />
+                  <Toggle label="Recently changed" checked={recentOnly} onChange={setRecentOnly} />
+                  <Toggle label="Empty fields" checked={emptyOnly} onChange={setEmptyOnly} />
+                  <button className="btn-secondary" onClick={() => setAllGroupsExpanded(true)}>Expand all</button>
+                  <button className="btn-secondary" onClick={() => setAllGroupsExpanded(false)}>Collapse all</button>
+                </div>
+              </div>
+              <div className="space-y-2 p-4">
+                {groupedAttributeEntries.length ? groupedAttributeEntries.map(([group, rows]) => {
+                  const isExpanded = expandedGroups.has(group);
+                  return (
+                    <section key={group} className="overflow-hidden rounded-md border border-slate-200 bg-white">
+                      <button className="flex w-full items-center justify-between gap-3 bg-slate-50 px-3 py-3 text-left" onClick={() => toggleGroup(group)} aria-expanded={isExpanded}>
+                        <span className="flex min-w-0 items-center gap-2">
+                          <ChevronDown size={16} className={cn('shrink-0 text-slate-500 transition-transform', !isExpanded && '-rotate-90')} />
+                          <span className="truncate text-sm font-bold uppercase text-slate-800">{group}</span>
+                        </span>
+                        <span className="badge border-slate-200 bg-white text-slate-600">{rows.length} fields</span>
+                      </button>
+                      {isExpanded && (
+                        group === coreRoomProfileGroup ? (
+                          <CoreRoomProfileCards rows={rows} />
+                        ) : (
+                        <div className="divide-y divide-slate-200">
+                          {rows.map((row) => (
+                            <div key={row.key} className={cn('grid gap-3 px-3 py-3 text-sm transition md:grid-cols-[1.1fr_1fr_1.2fr_130px] md:items-center', selectedField?.key === row.key && 'bg-ecu-mint/70')}>
+                              <button className="min-w-0 text-left" onClick={() => selectField(row.key)}>
+                                <span className="block font-bold text-slate-950">{row.label}</span>
+                                <span className="mt-1 block text-xs text-slate-500">{row.required ? 'Required' : 'Optional'} / {row.type}</span>
+                              </button>
+                              <div className="min-w-0 font-semibold text-slate-800">{editingKey === row.key ? <input className="input" value={editingValue} onChange={(event) => setEditingValue(event.target.value)} aria-label={`Edit ${row.label}`} /> : <span className="break-words">{row.value || 'Empty'}</span>}</div>
+                              <div className="min-w-0">
+                                <p className="text-slate-600">{row.description || 'No description provided'}</p>
+                                <p className="mt-1 text-xs font-semibold text-slate-500">{row.sourceSystem}</p>
+                              </div>
+                              <div className="flex justify-start gap-1 md:justify-end">
+                                {editingKey === row.key ? (
+                                  <>
+                                    <button className="btn-primary px-2 py-1" onClick={() => saveField(row)}>Save</button>
+                                    <button className="btn-secondary px-2 py-1" onClick={cancelEdit}>Cancel</button>
+                                  </>
+                                ) : (
+                                  <>
+                                    <button className="btn-secondary px-2 py-1" onClick={() => copyFieldValue(row)} aria-label={`Copy ${row.label}`}><Copy size={15} /></button>
+                                    <button className="btn-secondary px-2 py-1" onClick={() => startEdit(row)} aria-label={`Edit ${row.label}`}><Pencil size={15} /></button>
+                                    <button className="btn-secondary px-2 py-1" onClick={() => selectField(row.key)} aria-label={`View history for ${row.label}`}><History size={15} /></button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        )
+                      )}
+                    </section>
+                  );
+                }) : <p className="rounded-md border border-dashed border-slate-300 p-5 text-sm text-slate-600">No fields match the current filters.</p>}
+              </div>
+              {selectedTab === 'History' && (
+                <div className="border-t border-slate-200 p-4">
+                  <h3 className="font-bold text-slate-950">Downstream System Mappings</h3>
+                  <div className="mt-3 overflow-x-auto">
+                    <table className="w-full min-w-[620px] text-left text-sm">
+                      <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                        <tr>
+                          <th className="px-3 py-2">System</th>
+                          <th className="px-3 py-2">External ID</th>
+                          <th className="px-3 py-2">Status</th>
+                          <th className="px-3 py-2">Last verified</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-200">
+                        {roomMappings.map((mapping) => (
+                          <tr key={mapping.systemName}>
+                            <td className="px-3 py-2 font-semibold text-slate-900">{mapping.systemName}</td>
+                            <td className="px-3 py-2 text-slate-600">{mapping.externalId}</td>
+                            <td className="px-3 py-2"><StatusBadge status={mapping.status} /></td>
+                            <td className="px-3 py-2 text-slate-600">{mapping.lastVerified}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+            </div>
+            <RoomProfileDetailPanel
+              field={selectedField}
+              isOpen={isDetailOpen}
+              editingKey={editingKey}
+              editingValue={editingValue}
+              setEditingValue={setEditingValue}
+              startEdit={startEdit}
+              saveField={saveField}
+              cancelEdit={cancelEdit}
+              close={() => setIsDetailOpen(false)}
+            />
+          </div>
+        </div>
+
+        <div className="grid gap-5 xl:grid-cols-[1fr_360px]">
+          <TwoColumnPanel
+            leftTitle="Physical Room Information"
+            rightTitle="Booking and Access Information"
+            left={<p className="text-sm leading-6 text-slate-700">{room.physicalNotes || 'No physical notes recorded.'}</p>}
+            right={<p className="text-sm leading-6 text-slate-700">{room.bookingNotes || 'No booking notes recorded.'}</p>}
+          />
+          <div className="space-y-5">
+            <div className="panel rounded-lg">
+              <SectionTitle icon={ImageIcon} title="Floorplan" />
+              <div className="p-4">
+                <FloorplanPreview imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} />
+              </div>
+            </div>
+            <div className="panel rounded-lg p-4">
+              <h3 className="font-bold text-slate-950">Capabilities</h3>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {room.capabilities.map((capability) => <span key={capability} className="badge border-slate-200 bg-slate-50 text-slate-700">{capability}</span>)}
+              </div>
+            </div>
+            <div className="panel rounded-lg p-4">
+              <h3 className="font-bold text-slate-950">Data Quality</h3>
+              <div className="mt-3 space-y-2">
+                {getActiveRoomQualityFlags(room).length ? getActiveRoomQualityFlags(room).map((flag) => (
+                  <div key={flag} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{flag}</div>
+                )) : <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">No known data conflicts.</div>}
+              </div>
             </div>
           </div>
-          <div className="panel rounded-lg p-4">
-            <h3 className="font-bold text-slate-950">Data Quality</h3>
-            <div className="mt-3 space-y-2">
-              {getActiveRoomQualityFlags(room).length ? getActiveRoomQualityFlags(room).map((flag) => (
-                <div key={flag} className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{flag}</div>
-              )) : <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-800">No known data conflicts.</div>}
-            </div>
-          </div>
-          <div className="panel rounded-lg p-4">
-            <h3 className="font-bold text-slate-950">Audit Snapshot</h3>
-            <div className="mt-3 space-y-3 text-sm text-slate-600">
-              <p><History className="mr-2 inline" size={16} /> Last edited by Learning Environments</p>
-              <p><ShieldCheck className="mr-2 inline" size={16} /> Governed attributes require approval</p>
-              <p><RefreshCcw className="mr-2 inline" size={16} /> Downstream sync ready for future APIs</p>
-            </div>
-          </div>
-        </aside>
+        </div>
+        {toast && <div className="fixed bottom-4 right-4 z-40 rounded-md bg-ecu-black px-4 py-2 text-sm font-semibold text-white shadow-panel" role="status">{toast}</div>}
       </section>
     </>
+  );
+}
+
+function RoomProfileDetailPanel({
+  field,
+  isOpen,
+  editingKey,
+  editingValue,
+  setEditingValue,
+  startEdit,
+  saveField,
+  cancelEdit,
+  close,
+}: {
+  field?: RoomProfileFieldRow;
+  isOpen: boolean;
+  editingKey: string;
+  editingValue: string;
+  setEditingValue: (value: string) => void;
+  startEdit: (field: RoomProfileFieldRow) => void;
+  saveField: (field: RoomProfileFieldRow) => void;
+  cancelEdit: () => void;
+  close: () => void;
+}) {
+  if (!field) return null;
+
+  return (
+    <aside className={cn(
+      'bg-white xl:block',
+      isOpen ? 'fixed inset-x-0 bottom-0 z-30 max-h-[86vh] overflow-auto rounded-t-lg border-t border-slate-200 shadow-panel xl:static xl:max-h-none xl:rounded-none xl:border-t-0 xl:shadow-none' : 'hidden',
+    )}>
+      <div className="space-y-4 p-4">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="label">Selected field</p>
+            <h3 className="mt-1 text-lg font-bold text-slate-950">{field.label}</h3>
+          </div>
+          <button className="btn-secondary px-2 py-1 xl:hidden" onClick={close} aria-label="Close field detail panel">Close</button>
+        </div>
+        <div className="rounded-md border border-slate-200 p-3">
+          <p className="label">Current value</p>
+          {editingKey === field.key ? (
+            <div className="mt-2 space-y-2">
+              <input className="input" value={editingValue} onChange={(event) => setEditingValue(event.target.value)} aria-label={`Edit ${field.label}`} />
+              <div className="flex gap-2">
+                <button className="btn-primary" onClick={() => saveField(field)}>Save</button>
+                <button className="btn-secondary" onClick={cancelEdit}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <p className="mt-1 break-words font-bold text-slate-900">{field.value || 'Empty'}</p>
+          )}
+        </div>
+        <dl className="grid grid-cols-2 gap-3 text-sm">
+          <FieldDetailTerm label="Data type" value={field.type} />
+          <FieldDetailTerm label="Group" value={field.group} />
+          <FieldDetailTerm label="Source system" value={field.sourceSystem} />
+          <FieldDetailTerm label="Required" value={field.required ? 'Yes' : 'No'} />
+          <FieldDetailTerm label="Last updated" value={formatFieldTimestamp(field.updatedAt)} />
+          <FieldDetailTerm label="Updated by" value="System" />
+        </dl>
+        <div>
+          <p className="label">Description</p>
+          <p className="mt-1 text-sm leading-6 text-slate-700">{field.description || 'No description provided'}</p>
+        </div>
+        <button className="btn-primary w-full" onClick={() => startEdit(field)}><Pencil size={16} /> Edit field</button>
+        <div className="border-t border-slate-200 pt-4">
+          <h4 className="font-bold text-slate-950">Field History</h4>
+          <div className="mt-3 space-y-3">
+            {buildFieldHistoryItems(field).map((item) => (
+              <div key={item.title} className="border-l-2 border-ecu-teal pl-3 text-sm">
+                <p className="font-semibold text-slate-900">{item.title}</p>
+                <p className="text-slate-600">{item.actor}</p>
+                <p className="mt-1 text-slate-700">{item.detail}</p>
+                <p className="mt-1 text-xs font-semibold text-slate-500">{item.source}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function CoreRoomProfileCards({ rows }: { rows: RoomProfileFieldRow[] }) {
+  return (
+    <div className="grid gap-3 bg-slate-50/50 p-3 sm:grid-cols-2 xl:grid-cols-4">
+      {rows.map((row) => {
+        const Icon = coreRoomProfileIcon(row.key);
+        return (
+          <div
+            key={row.key}
+            className="min-w-0 rounded-md border border-slate-200 bg-white p-4 shadow-sm"
+          >
+            <div className="flex items-start gap-3">
+              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-ecu-mint text-ecu-black">
+                <Icon size={18} />
+              </span>
+              <span className="min-w-0">
+                <span className="label block">{row.label}</span>
+                <span className="mt-1 block break-words text-base font-bold text-slate-950">{row.value || 'Empty'}</span>
+                <span className="mt-2 block text-xs leading-5 text-slate-500">{row.description || 'No description provided'}</span>
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function coreRoomProfileIcon(key: string) {
+  if (key === 'capacity') return Users;
+  if (key === 'building') return Building2;
+  if (key === 'campus') return Home;
+  if (key === 'room_code') return KeyRound;
+  return Database;
+}
+
+function FieldDetailTerm({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="rounded-md border border-slate-200 p-3">
+      <dt className="label">{label}</dt>
+      <dd className="mt-1 break-words font-semibold text-slate-800">{value || 'Unknown'}</dd>
+    </div>
   );
 }
 
@@ -4652,6 +4976,126 @@ function formatAttributeValue(value: string | number | boolean | string[]) {
   if (Array.isArray(value)) return value.join(', ');
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
   return String(value);
+}
+
+function buildRoomProfileFields(room: Room, attributes: AttributeDefinition[]): RoomProfileFieldRow[] {
+  const attributeRows = Object.entries(room.attributes).map(([key, value]) => {
+    const definition = attributes.find((attribute) => attribute.key === key)
+      ?? roomDataDictionaryByKey.get(key)
+      ?? findAttributeDefinitionForHeader(key);
+    const group = normalizeAttributeGroup(definition?.group);
+    const sourceSystem = inferFieldSourceSystem(definition, group);
+
+    return {
+      key,
+      tab: inferRoomProfileTab(definition?.group ?? group, definition?.label ?? key),
+      group,
+      label: definition?.label ?? titleCase(key),
+      value: formatAttributeValue(value),
+      rawValue: value,
+      description: definition?.description ?? '',
+      sourceSystem,
+      type: definition?.type ?? 'text',
+      required: definition?.required ?? false,
+      updatedAt: definition?.updatedAt,
+    };
+  });
+
+  const coreRows: RoomProfileFieldRow[] = [
+    createCoreRoomProfileField('room_code', 'Room ID', room.roomCode, 'Canonical room identifier', 'Core room record', 'Overview', coreRoomProfileGroup, 'system reference', true),
+    createCoreRoomProfileField('room_name', 'Room name', getRoomFinalName(room) || room.name, 'Final room name shown in room search and profile views', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', true),
+    createCoreRoomProfileField('assigned_department', 'Assigned department', room.owner, 'Department responsible for the space', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', false),
+    createCoreRoomProfileField('room_type', 'Room type', room.type || room.category, 'Room type or category classification', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', false),
+    createCoreRoomProfileField('campus', 'Campus', room.campus, 'Campus where the room is located', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', true),
+    createCoreRoomProfileField('building', 'Building', room.building, 'Building where the room is located', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', true),
+    createCoreRoomProfileField('floor', 'Floor', room.floor, 'Floor number or label', 'Core room record', 'Overview', coreRoomProfileGroup, 'text', false),
+    createCoreRoomProfileField('capacity', 'Capacity', getRoomCapacityDisplay(room, attributes), 'Number of people the room can accommodate', 'Core room record', 'Overview', coreRoomProfileGroup, 'number', false),
+  ];
+
+  return [...coreRows, ...attributeRows]
+    .filter((row, index, rows) => rows.findIndex((item) => item.key === row.key) === index)
+    .sort((a, b) => roomProfileTabs.indexOf(a.tab) - roomProfileTabs.indexOf(b.tab) || compareRoomProfileGroups(a.group, b.group) || a.label.localeCompare(b.label));
+}
+
+function createCoreRoomProfileField(
+  key: string,
+  label: string,
+  value: string | number | boolean | string[],
+  description: string,
+  sourceSystem: string,
+  tab: string,
+  group: string,
+  type: AttributeDefinition['type'],
+  required: boolean,
+): RoomProfileFieldRow {
+  return {
+    key,
+    tab,
+    group,
+    label,
+    value: formatAttributeValue(value),
+    rawValue: value,
+    description,
+    sourceSystem,
+    type,
+    required,
+  };
+}
+
+function inferRoomProfileTab(group: string, label: string) {
+  const text = `${group} ${label}`.toLowerCase();
+  if (text.includes('identification') || text.includes('identifier') || text.includes('archibus') || text.includes('id')) return 'Identification';
+  if (text.includes('timetable') || text.includes('teaching') || text.includes('outlook') || text.includes('o365')) return 'Timetabling';
+  if (text.includes('technology') || text.includes('av') || text.includes('appspace') || text.includes('hector') || text.includes('compute')) return 'Technology';
+  if (text.includes('booking') || text.includes('bookable') || text.includes('momentus') || text.includes('panel')) return 'Booking';
+  if (text.includes('governance') || text.includes('security') || text.includes('access') || text.includes('owner')) return 'Governance';
+  return 'Overview';
+}
+
+function inferFieldSourceSystem(definition: AttributeDefinition | undefined, group: string) {
+  const systems = definition?.downstreamSystems ?? [];
+  if (systems.length) return systems[0];
+  const text = `${definition?.label ?? ''} ${definition?.sourceField ?? ''} ${group}`.toLowerCase();
+  if (text.includes('archibus') || text.includes('afm.rm')) return 'Archibus';
+  if (text.includes('outlook') || text.includes('o365')) return 'O365';
+  if (text.includes('timetable')) return 'Timetabling';
+  if (text.includes('appspace')) return 'Appspace';
+  if (text.includes('momentus')) return 'Momentus';
+  return 'Unknown';
+}
+
+function compareRoomProfileGroups(a: string, b: string) {
+  const preferred = [coreRoomProfileGroup];
+  const aIndex = preferred.indexOf(a);
+  const bIndex = preferred.indexOf(b);
+  if (aIndex !== -1 || bIndex !== -1) return (aIndex === -1 ? preferred.length : aIndex) - (bIndex === -1 ? preferred.length : bIndex);
+  return compareRoomDataDictionaryGroups(a, b);
+}
+
+function coerceEditedAttributeValue(value: string, type: AttributeDefinition['type'], previousValue: string | number | boolean | string[]) {
+  if (Array.isArray(previousValue)) return value.split(',').map((item) => item.trim()).filter(Boolean);
+  if (type === 'boolean') return ['yes', 'true', '1', 'y'].includes(value.trim().toLowerCase());
+  if (type === 'number') return Number(value) || 0;
+  if (type === 'multi-select' || type === 'tag') return value.split(',').map((item) => item.trim()).filter(Boolean);
+  return value;
+}
+
+function formatFieldTimestamp(value?: string) {
+  if (!value) return '';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function buildFieldHistoryItems(field: RoomProfileFieldRow) {
+  return [
+    {
+      title: formatFieldTimestamp(field.updatedAt) || 'No timestamp recorded',
+      actor: 'System',
+      detail: `Current value is ${field.value || 'empty'}.`,
+      source: field.sourceSystem,
+    },
+  ];
 }
 
 function getRoomAttributeDefinitions(attributes: AttributeDefinition[]) {
