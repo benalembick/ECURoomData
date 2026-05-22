@@ -72,22 +72,6 @@ export const floorplans: FloorplanDefinition[] = [
     ],
   },
   {
-    id: 'cc-ground-north',
-    campusCode: 'CC',
-    buildingCode: '1',
-    buildingName: 'ECU City Campus',
-    floor: 'Ground',
-    zone: 'North',
-    imagePath: '/floorplans/placeholders/ecu-city-ground-north.svg',
-    imageAlt: 'Placeholder ECU City Campus Ground North floorplan',
-    hotspots: [
-      { roomCode: 'CC.1N.GST02', shape: 'rect', points: [12, 20, 24, 24] },
-      { roomCode: 'CC.1N.GST03', shape: 'rect', points: [43, 20, 22, 24] },
-      { roomCode: 'CC.1N.GC01', shape: 'rect', points: [70, 23, 14, 19] },
-      { roomCode: 'CC.1N.GST01', shape: 'polygon', points: [18, 60, 41, 56, 48, 76, 25, 84] },
-    ],
-  },
-  {
     id: 'cc-level-2-both',
     campusCode: 'CC',
     buildingCode: '1',

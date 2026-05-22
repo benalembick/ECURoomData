@@ -64,7 +64,7 @@ import { persistImportToSupabase, type PersistImportProgress, type PersistImport
 import { persistBuildingDetails, persistBuildingRemoval, persistCampusDetails, persistCampusMapping, persistCampusRemoval, type CampusMappingProgress } from './services/campusPersistence';
 import { createDataBackup, deleteDataBackup, getBackupOperation, listDataBackups, restoreDataBackup, type BackupOperation, type DataBackupSet } from './services/dataBackups';
 import { createAttributeGroup, deleteAttributeGroup, moveAttributeDefinitionsToGroup, renameAttributeGroup } from './services/fieldManagement';
-import { loadSharedFloorplansFromSupabase, saveSharedFloorplanToSupabase } from './services/floorplanPersistence';
+import { deleteSharedFloorplanFromSupabase, loadSharedFloorplansFromSupabase, saveSharedFloorplanToSupabase } from './services/floorplanPersistence';
 import { loadRoomDataFromSupabase, type RoomDataLoadProgress } from './services/roomData';
 import { getCurrentUserProfile, listUserProfiles, saveUserProfile, type SaveUserPayload } from './services/userManagement';
 import {
@@ -130,9 +130,13 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'patterns', label: 'Patterns', icon: Layers3 },
   { id: 'rules', label: 'Rules', icon: GitBranch },
   { id: 'governance', label: 'Governance', icon: ClipboardCheck },
-  { id: 'import', label: 'Import', icon: FileSpreadsheet },
-  { id: 'backups', label: 'Backups', icon: Archive },
-  { id: 'users', label: 'Users', icon: Users },
+];
+
+const adminViews: View[] = ['import', 'backups', 'users'];
+const adminNavItems: { id: View; label: string; icon: typeof Home; adminOnly: boolean }[] = [
+  { id: 'import', label: 'Import', icon: FileSpreadsheet, adminOnly: false },
+  { id: 'backups', label: 'Backups', icon: Archive, adminOnly: true },
+  { id: 'users', label: 'Users', icon: Users, adminOnly: true },
 ];
 
 const issueTrackerViews: View[] = ['issues-dashboard', 'issues', 'issue-change-requests', 'issue-defects', 'issue-reports', 'issue-admin'];
@@ -298,7 +302,7 @@ function roomFloorplanLookupKeys(roomCode: string) {
 }
 
 function normalizeRoomCodeKey(value: string) {
-  return value.trim().toUpperCase().replace(/\s+/g, '');
+  return value.trim().toUpperCase().replace(/\s+/g, '').replace(/^CC\./, '');
 }
 
 function getRoomFloorplanThumbnailUrl(imageUrl?: string) {
@@ -342,11 +346,16 @@ function floorDisplayName(floor: string) {
 
 function floorSortValue(floor: string) {
   const normalized = floorDisplayName(floor).toLowerCase();
-  if (normalized === 'level basement') return -30;
-  if (normalized === 'level ground') return -20;
-  if (normalized === 'level mezzanine') return -10;
-  const levelNumber = normalized.match(/^level\s+(\d+)$/)?.[1];
-  if (levelNumber) return Number(levelNumber);
+  if (normalized === 'level basement') return -60;
+  if (normalized === 'level ground') return -50;
+  if (normalized === 'level ground gallery') return -40;
+  if (normalized === 'level ground mezzanine') return -30;
+  if (normalized === 'level mezzanine') return -20;
+  if (normalized === 'level mezzanine gallery') return -10;
+  const exactLevel = normalized.match(/^level\s+(\d+)$/)?.[1];
+  if (exactLevel) return Number(exactLevel);
+  const galleryLevel = normalized.match(/^level\s+(\d+)\s+gallery$/)?.[1];
+  if (galleryLevel) return Number(galleryLevel) + 0.5;
   return 1000;
 }
 
@@ -413,7 +422,7 @@ export function App() {
   const canEdit = !isSupabaseConfigured || authProfile?.role === 'room_data_editor' || authProfile?.role === 'admin';
   const canManageUsers = authProfile?.role === 'admin';
   const canManageFieldConfig = !isSupabaseConfigured || canManageUsers;
-  const visibleNavItems = navItems.filter((item) => !['users', 'backups', 'data-fields'].includes(item.id) || (item.id === 'data-fields' ? canManageFieldConfig : canManageUsers));
+  const visibleNavItems = navItems.filter((item) => item.id !== 'data-fields' || canManageFieldConfig);
 
   const navigateToView = useCallback((nextView: View, searchValue = '') => {
     setView(nextView);
@@ -474,6 +483,7 @@ export function App() {
         );
         setDataMessage(`Loaded ${loaded.rooms.length} room(s) from Supabase. Matched ${floorplanResult.matched} floorplan image(s).`);
       }
+
     });
 
     roomDataLoadRef.current = loadPromise;
@@ -512,6 +522,15 @@ export function App() {
       setAuthProfile(profile);
       setAuthInitializing(false);
       void refreshRoomData();
+      const { data: savedColours, error: coloursError } = await supabase.from('business_units').select('name, reference_colour');
+      if (!coloursError && savedColours?.length) {
+        const colourByName = new Map(savedColours.map((row) => [row.name as string, row.reference_colour as string]));
+        setIssueBusinessUnits((units) => units.map((unit) => colourByName.has(unit.name) ? { ...unit, colour: colourByName.get(unit.name)! } : unit));
+        setIssues((current) => current.map((issue) => {
+          const colour = colourByName.get(issue.businessUnitName);
+          return colour ? { ...issue, businessUnitColour: colour } : issue;
+        }));
+      }
     };
 
     supabaseClient.auth.getSession().then(({ data }) => {
@@ -687,6 +706,45 @@ export function App() {
                 </button>
               );
             })}
+            <div className="min-w-fit pt-1 lg:w-full lg:border-t lg:border-slate-200 lg:pt-3">
+              <button
+                type="button"
+                onClick={() => navigateToView('import')}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition',
+                  adminViews.includes(view)
+                    ? 'bg-ecu-mint text-ecu-black'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                )}
+              >
+                <ShieldCheck size={18} />
+                <span className="flex-1 text-left">Admin</span>
+                {adminViews.includes(view) && <ChevronDown size={15} />}
+              </button>
+              {adminViews.includes(view) && (
+                <div className="mt-1 flex gap-1 pl-2 lg:block lg:space-y-1 lg:pl-6">
+                  {adminNavItems.filter((item) => !item.adminOnly || canManageUsers).map((subItem) => {
+                    const SubIcon = subItem.icon;
+                    return (
+                      <button
+                        key={subItem.id}
+                        type="button"
+                        onClick={() => navigateToView(subItem.id)}
+                        className={cn(
+                          'flex min-w-fit items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition lg:w-full',
+                          view === subItem.id
+                            ? 'bg-white text-ecu-black ring-1 ring-ecu-teal/30'
+                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950',
+                        )}
+                      >
+                        <SubIcon size={15} />
+                        {subItem.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
             <div className="min-w-fit pt-1 lg:w-full lg:border-t lg:border-slate-200 lg:pt-3">
               <button
                 type="button"
@@ -1710,7 +1768,7 @@ function IssuesDashboard({
   const unitCounts = businessUnits.map((unit) => ({
     label: unit.name,
     count: issues.filter((issue) => issue.businessUnitId === unit.id).length,
-    colour: getBusinessUnitChartColour(unit.name, unit.colour),
+    colour: unit.colour,
     filter: { unit: unit.id },
   }));
   const priorityCounts = orderIssueChartRows(countBy(issues, (issue) => issue.priority || 'Unspecified'), issuePriorityChartOrder)
@@ -1868,8 +1926,16 @@ function IssuesRegisterPage({
   const pagedIssues = filteredIssues.slice((page - 1) * pageSize, page * pageSize);
   const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
 
+  const [showNewIssue, setShowNewIssue] = useState(false);
+
   const updateIssue = (nextIssue: Issue) => {
     setIssues(issues.map((issue) => (issue.id === nextIssue.id ? nextIssue : issue)));
+  };
+
+  const addIssue = (newIssue: Issue) => {
+    setIssues([newIssue, ...issues]);
+    setShowNewIssue(false);
+    setSelectedIssueId(newIssue.id);
   };
 
   const title = mode === 'change-requests' ? 'Change Requests' : mode === 'defects' ? 'Defects' : 'All Issues';
@@ -1888,7 +1954,12 @@ function IssuesRegisterPage({
       <PageHeader
         title={title}
         description="Search, sort, triage, export, comment, and update imported post occupancy issues."
-        action={<button className="btn-secondary" onClick={() => exportIssuesCsv(filteredIssues)}><Download size={16} /> Export CSV</button>}
+        action={
+          <div className="flex gap-2">
+            <button className="btn-secondary" onClick={() => exportIssuesCsv(filteredIssues)}><Download size={16} /> Export CSV</button>
+            <button className="btn-primary" onClick={() => setShowNewIssue(true)}><Plus size={16} /> New Issue</button>
+          </div>
+        }
       />
       {activeFilterLabels.length > 0 && (
         <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-ecu-teal/30 bg-ecu-mint px-3 py-2 text-sm text-ecu-black">
@@ -1978,8 +2049,8 @@ function IssuesRegisterPage({
                     <td className="px-3 py-3">
                       {issue.roomCode ? (
                         <button
-                          className={cn('font-bold', roomExists ? 'text-ecu-teal hover:underline' : 'text-slate-700')}
-                          onClick={() => (roomExists ? openRoomProfile(issue.roomCode) : setSelectedIssueId(issue.id))}
+                          className="font-bold text-ecu-teal hover:underline"
+                          onClick={() => setSelectedIssueId(issue.id)}
                         >
                           {issue.roomCode}
                         </button>
@@ -2003,19 +2074,34 @@ function IssuesRegisterPage({
           </table>
         </div>
       </div>
-      {selectedIssue && (
-        <IssueDetailModal
-          issue={selectedIssue}
+      {showNewIssue && (
+        <NewIssueModal
+          issues={issues}
+          businessUnits={businessUnits}
           categories={categories}
           statuses={statuses}
-          attachments={attachments.filter((attachment) => attachment.issueId === selectedIssue.id)}
-          roomExists={Boolean(selectedIssue.roomCode && rooms.some((room) => normalizeRoomCodeKey(room.roomCode) === normalizeRoomCodeKey(selectedIssue.roomCode)))}
-          openRoomProfile={openRoomProfile}
-          updateIssue={updateIssue}
-          close={() => setSelectedIssueId(null)}
+          addIssue={addIssue}
+          close={() => setShowNewIssue(false)}
           requireAuthenticatedEdit={requireAuthenticatedEdit}
         />
       )}
+      {selectedIssue && !showNewIssue && (() => {
+        const linkedRoom = selectedIssue.roomCode ? rooms.find((room) => normalizeRoomCodeKey(room.roomCode) === normalizeRoomCodeKey(selectedIssue.roomCode)) : undefined;
+        return (
+          <IssueDetailModal
+            issue={selectedIssue}
+            categories={categories}
+            statuses={statuses}
+            attachments={attachments.filter((attachment) => attachment.issueId === selectedIssue.id)}
+            roomExists={Boolean(linkedRoom)}
+            roomFloorplanImageUrl={linkedRoom?.floorplanImageUrl}
+            openRoomProfile={openRoomProfile}
+            updateIssue={updateIssue}
+            close={() => setSelectedIssueId(null)}
+            requireAuthenticatedEdit={requireAuthenticatedEdit}
+          />
+        );
+      })()}
     </>
   );
 }
@@ -2096,10 +2182,21 @@ function IssueAdmin({
   requireAuthenticatedEdit: (action?: string) => boolean;
 }) {
   const commenterNames = Array.from(new Set(issues.flatMap((issue) => issue.comments.map((comment) => comment.author)).filter(Boolean))).sort();
+  const [colourSaveError, setColourSaveError] = useState('');
+  const colourSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
   const updateUnitColour = (unitId: string, colour: string) => {
     if (!requireAuthenticatedEdit('manage business unit colours')) return;
-    setBusinessUnits(businessUnits.map((unit) => (unit.id === unitId ? { ...unit, colour } : unit)));
+    const unit = businessUnits.find((u) => u.id === unitId);
+    setBusinessUnits(businessUnits.map((u) => (u.id === unitId ? { ...u, colour } : u)));
     setIssues(issues.map((issue) => (issue.businessUnitId === unitId ? { ...issue, businessUnitColour: colour } : issue)));
+    if (!supabase || !unit) return;
+    if (colourSaveTimerRef.current) clearTimeout(colourSaveTimerRef.current);
+    colourSaveTimerRef.current = setTimeout(async () => {
+      const { error } = await supabase.from('business_units').upsert({ name: unit.name, reference_colour: colour }, { onConflict: 'name' });
+      if (error) setColourSaveError(`Could not save colour for ${unit.name}: ${error.message}`);
+      else setColourSaveError('');
+    }, 400);
   };
   const addCategory = () => {
     if (!requireAuthenticatedEdit('manage issue categories')) return;
@@ -2148,6 +2245,7 @@ function IssueAdmin({
               </label>
             ))}
           </div>
+          {colourSaveError && <p className="mt-2 text-sm text-red-600">{colourSaveError}</p>}
         </div>
         <div className="panel rounded-lg p-4">
           <h3 className="font-bold text-slate-950">Commenter names</h3>
@@ -2161,12 +2259,193 @@ function IssueAdmin({
   );
 }
 
+const issuePriorities = [
+  '1 - Immediate (Critical Emergency)',
+  '2 - Urgent - Significant Impact',
+  '3 - Standard - Moderate Impact',
+  '4 - Minor - Low Impact / Cosmetic',
+];
+
+function nextIssueIdForUnit(issues: Issue[], businessUnitId: string, businessUnitName: string): string {
+  const prefix = businessUnitName.replace(/\s/g, '_').replace(/[^A-Za-z0-9_+]/g, '');
+  const nums = issues
+    .filter((i) => i.businessUnitId === businessUnitId)
+    .map((i) => { const m = i.issueId.match(/(\d+)$/); return m ? parseInt(m[1], 10) : 0; });
+  const max = nums.length ? Math.max(...nums) : 0;
+  return `${prefix}-${String(max + 1).padStart(3, '0')}`;
+}
+
+function NewIssueModal({
+  issues,
+  businessUnits,
+  categories,
+  statuses,
+  addIssue,
+  close,
+  requireAuthenticatedEdit,
+}: {
+  issues: Issue[];
+  businessUnits: BusinessUnit[];
+  categories: IssueCategory[];
+  statuses: IssueStatus[];
+  addIssue: (issue: Issue) => void;
+  close: () => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
+  const today = new Date().toISOString().slice(0, 10);
+  const defaultUnit = businessUnits[0];
+  const defaultStatus = statuses.find((s) => s.name === 'Open') ?? statuses[0];
+  const defaultCategory = categories[0];
+
+  const [unitId, setUnitId] = useState(defaultUnit?.id ?? '');
+  const [subject, setSubject] = useState('');
+  const [detail, setDetail] = useState('');
+  const [categoryName, setCategoryName] = useState(defaultCategory?.name ?? '');
+  const [statusName, setStatusName] = useState(defaultStatus?.name ?? 'Open');
+  const [priority, setPriority] = useState('');
+  const [dateIdentified, setDateIdentified] = useState(today);
+  const [contactPerson, setContactPerson] = useState('');
+  const [roomCode, setRoomCode] = useState('');
+  const [roomName, setRoomName] = useState('');
+  const [responsiblePerson, setResponsiblePerson] = useState('');
+  const [isChangeRequest, setIsChangeRequest] = useState(false);
+  const [error, setError] = useState('');
+
+  const selectedUnit = businessUnits.find((u) => u.id === unitId);
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    if (!requireAuthenticatedEdit('add a new issue')) return;
+    if (!subject.trim()) { setError('Subject is required.'); return; }
+    if (!selectedUnit) { setError('Business unit is required.'); return; }
+    setError('');
+    const issueId = nextIssueIdForUnit(issues, unitId, selectedUnit.name);
+    const id = `${unitId}-${Date.now()}`;
+    const newIssue: Issue = {
+      id,
+      issueId,
+      businessUnitId: unitId,
+      businessUnitName: selectedUnit.name,
+      businessUnitColour: selectedUnit.colour,
+      originalWorksheet: selectedUnit.name,
+      originalRowNumber: 0,
+      dateIdentified,
+      contactPerson: contactPerson.trim(),
+      roomCode: roomCode.trim(),
+      roomName: roomName.trim(),
+      subject: subject.trim(),
+      detail: detail.trim(),
+      priority,
+      photoReference: '',
+      sourceCategory: categoryName,
+      category: categoryName,
+      isChangeRequest: isChangeRequest || categoryName === 'Change Request',
+      responsiblePerson: responsiblePerson.trim(),
+      status: statusName as Issue['status'],
+      dateClosed: '',
+      aconexRef: '',
+      aconexFieldDefect: '',
+      metadata: {},
+      comments: [],
+    };
+    addIssue(newIssue);
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/40 p-4" role="dialog" aria-modal="true">
+      <div className="ml-auto flex h-full max-w-2xl flex-col overflow-hidden rounded-lg bg-white shadow-panel">
+        <div className="flex items-center justify-between gap-4 border-b border-slate-200 p-5">
+          <h2 className="text-xl font-bold text-slate-950">New Issue</h2>
+          <button className="btn-secondary" onClick={close}>Cancel</button>
+        </div>
+        <form className="min-h-0 flex-1 overflow-y-auto p-5" onSubmit={handleSubmit}>
+          <div className="grid gap-4">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="label">Business unit <span className="text-red-500">*</span></span>
+                <select className="input mt-1" value={unitId} onChange={(e) => setUnitId(e.target.value)}>
+                  {businessUnits.map((u) => <option key={u.id} value={u.id}>{u.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="label">Date identified</span>
+                <input type="date" className="input mt-1" value={dateIdentified} onChange={(e) => setDateIdentified(e.target.value)} />
+              </label>
+            </div>
+            <label className="block">
+              <span className="label">Subject <span className="text-red-500">*</span></span>
+              <input className="input mt-1" value={subject} onChange={(e) => setSubject(e.target.value)} placeholder="Brief description of the issue" />
+            </label>
+            <label className="block">
+              <span className="label">Detail</span>
+              <textarea className="input mt-1 min-h-[96px]" value={detail} onChange={(e) => setDetail(e.target.value)} placeholder="Full detail..." />
+            </label>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="label">Category <span className="text-red-500">*</span></span>
+                <select className="input mt-1" value={categoryName} onChange={(e) => { setCategoryName(e.target.value); if (e.target.value === 'Change Request') setIsChangeRequest(true); }}>
+                  {categories.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="label">Status</span>
+                <select className="input mt-1" value={statusName} onChange={(e) => setStatusName(e.target.value)}>
+                  {statuses.map((s) => <option key={s.id} value={s.name}>{s.name}</option>)}
+                </select>
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="label">Priority</span>
+                <select className="input mt-1" value={priority} onChange={(e) => setPriority(e.target.value)}>
+                  <option value="">— Unspecified —</option>
+                  {issuePriorities.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <label className="block">
+                <span className="label">Responsible person</span>
+                <input className="input mt-1" value={responsiblePerson} onChange={(e) => setResponsiblePerson(e.target.value)} placeholder="Name" />
+              </label>
+            </div>
+            <div className="grid gap-4 sm:grid-cols-2">
+              <label className="block">
+                <span className="label">Contact person</span>
+                <input className="input mt-1" value={contactPerson} onChange={(e) => setContactPerson(e.target.value)} placeholder="Name" />
+              </label>
+              <div className="grid gap-4 sm:grid-cols-2">
+                <label className="block">
+                  <span className="label">Room code</span>
+                  <input className="input mt-1" value={roomCode} onChange={(e) => setRoomCode(e.target.value)} placeholder="e.g. 1N.448" />
+                </label>
+                <label className="block">
+                  <span className="label">Room name</span>
+                  <input className="input mt-1" value={roomName} onChange={(e) => setRoomName(e.target.value)} placeholder="Room name" />
+                </label>
+              </div>
+            </div>
+            <label className="flex items-center gap-2">
+              <input type="checkbox" className="h-4 w-4 rounded border-slate-300" checked={isChangeRequest} onChange={(e) => setIsChangeRequest(e.target.checked)} />
+              <span className="label mb-0">Change request</span>
+            </label>
+            {error && <p className="text-sm text-red-600">{error}</p>}
+          </div>
+          <div className="mt-6 flex justify-end gap-2">
+            <button type="button" className="btn-secondary" onClick={close}>Cancel</button>
+            <button type="submit" className="btn-primary">Create Issue</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 function IssueDetailModal({
   issue,
   categories,
   statuses,
   attachments,
   roomExists,
+  roomFloorplanImageUrl,
   openRoomProfile,
   updateIssue,
   close,
@@ -2177,6 +2456,7 @@ function IssueDetailModal({
   statuses: IssueStatus[];
   attachments: IssueAttachmentReference[];
   roomExists: boolean;
+  roomFloorplanImageUrl?: string;
   openRoomProfile: (roomCode: string) => void;
   updateIssue: (issue: Issue) => void;
   close: () => void;
@@ -2268,6 +2548,11 @@ function IssueDetailModal({
               </div>
               <div className="rounded-md border border-slate-200 p-4">
                 <h3 className="font-bold text-slate-950">Room link</h3>
+                {roomFloorplanImageUrl && (
+                  <div className="mt-3">
+                    <RoomFloorplanThumbnail imageUrl={roomFloorplanImageUrl} roomName={issue.roomName || issue.roomCode} isDataLoading={false} />
+                  </div>
+                )}
                 <p className="mt-2 text-sm text-slate-700">{issue.roomCode || 'No room code recorded'}</p>
                 {issue.roomCode && (
                   <button className="btn-secondary mt-3" onClick={() => (roomExists ? openRoomProfile(issue.roomCode) : undefined)} disabled={!roomExists}>
@@ -2340,7 +2625,7 @@ function matchesIssueQuickFilter(issue: Issue, filter: string) {
 }
 
 function isIssueImageUrl(value: string) {
-  return /\.(png|jpe?g|gif|webp|bmp|svg)(?:$|[?#])/i.test(value);
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(?:$|[?#])/i.test(value) || value.startsWith('/issue-assets/');
 }
 
 function compareIssueField(a: Issue, b: Issue, key: IssueSortKey, direction: 'asc' | 'desc') {
@@ -2443,26 +2728,6 @@ const issuePriorityChartColours: Record<string, string> = {
   '1 - Immediate (Critical Emergency)': '#97a7ba',
 };
 
-const issueBusinessUnitChartColours: Record<string, string> = {
-  SAH: '#de2f34',
-  WAAPA: '#5f7fa8',
-  SBL: '#9bd957',
-  GEM: '#6b7b92',
-  'CLT-Teaching': '#6b7b92',
-  'Access + Equity': '#6b7b92',
-  'Student Admin': '#47cdd3',
-  Student_Hub: '#ffc000',
-  Guild: '#6b7b92',
-  Library: '#00b050',
-  'Digital Services': '#6b7b92',
-  CSO: '#6b7b92',
-  'Creative Futures': '#6b7b92',
-  'Wellbeing Precinct': '#ffff00',
-  General: '#6b7b92',
-  'Kurongkurl Katitjin': '#6b7b92',
-  Science: '#6b7b92',
-};
-
 function getIssueStatusChartColour(label: string) {
   return issueStatusChartColours[label] ?? '#6b7b92';
 }
@@ -2475,9 +2740,7 @@ function getIssuePriorityChartColour(label: string) {
   return issuePriorityChartColours[label] ?? '#6b7b92';
 }
 
-function getBusinessUnitChartColour(label: string, fallback: string) {
-  return issueBusinessUnitChartColours[label] ?? fallback;
-}
+
 
 function orderIssueChartRows(rows: IssueChartRow[], order: string[]) {
   const orderIndex = new Map(order.map((label, index) => [label, index]));
@@ -3091,6 +3354,22 @@ function FloorplansPage({
     return savedFloorplan;
   };
 
+  const deleteUploadedFloorplan = async (floorplan: FloorplanDefinition) => {
+    if (!window.confirm(`Delete the "${floorplan.floor} / ${floorplan.zone}" floorplan? This cannot be undone.`)) return;
+    setFloorplanStatus('Deleting floorplan...');
+    try {
+      if (isSupabaseConfigured) await deleteSharedFloorplanFromSupabase(floorplan.id);
+      setUploadedFloorplans((current) => {
+        const next = current.filter((item) => item.id !== floorplan.id);
+        if (!isSupabaseConfigured) void saveLocalUploadedFloorplans(next);
+        return next;
+      });
+      setFloorplanStatus('Floorplan deleted.');
+    } catch (error) {
+      setFloorplanStatus(error instanceof Error ? error.message : 'Could not delete floorplan.');
+    }
+  };
+
   const replaceUploadedFloorplan = async (floorplan: FloorplanDefinition) => {
     const savedFloorplan = isSupabaseConfigured ? await saveSharedFloorplanToSupabase(floorplan) : floorplan;
     setUploadedFloorplans((current) => {
@@ -3159,6 +3438,7 @@ function FloorplansPage({
             roomMetadata={roomMetadata}
             openRoomProfile={openRoomProfile}
             onReassess={selectedFloorplan.source === 'uploaded-pdf' ? reassessUploadedFloorplan : undefined}
+            onDelete={uploadedFloorplans.some((f) => f.id === selectedFloorplan.id) ? deleteUploadedFloorplan : undefined}
             isReassessing={reassessingFloorplanId === selectedFloorplan.id}
             reassessStatus={floorplanStatus}
           />
@@ -3359,6 +3639,7 @@ function FloorplanViewer({
   roomMetadata,
   openRoomProfile,
   onReassess,
+  onDelete,
   isReassessing = false,
   reassessStatus,
 }: {
@@ -3366,6 +3647,7 @@ function FloorplanViewer({
   roomMetadata: Map<string, Room>;
   openRoomProfile: (roomCode: string) => void;
   onReassess?: (floorplan: FloorplanDefinition) => void;
+  onDelete?: (floorplan: FloorplanDefinition) => void;
   isReassessing?: boolean;
   reassessStatus?: string;
 }) {
@@ -3422,6 +3704,11 @@ function FloorplanViewer({
             <button type="button" className="btn-secondary" disabled={isReassessing} onClick={() => onReassess(floorplan)}>
               {isReassessing ? <span className="loading-spinner h-4 w-4" aria-hidden="true" /> : <RefreshCcw size={16} />}
               Re-assess hotspots
+            </button>
+          )}
+          {onDelete && (
+            <button type="button" className="btn-secondary text-red-600 hover:border-red-300 hover:bg-red-50" onClick={() => onDelete(floorplan)}>
+              <Trash2 size={16} /> Delete
             </button>
           )}
           <button type="button" className="btn-secondary" onClick={() => updateScale(scale + 0.2)} aria-label="Zoom in"><Plus size={16} /> Zoom</button>

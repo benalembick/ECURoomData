@@ -21,6 +21,9 @@ export default defineConfig(({ mode }) => {
     : null;
 
   return {
+    server: {
+      historyApiFallback: true,
+    },
     plugins: [
       react(),
       {

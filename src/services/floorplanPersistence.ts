@@ -61,6 +61,12 @@ export async function loadSharedFloorplansFromSupabase(): Promise<FloorplanDefin
   return ((data ?? []) as unknown as DbFloorplan[]).map(mapDbFloorplan);
 }
 
+export async function deleteSharedFloorplanFromSupabase(id: string): Promise<void> {
+  if (!isSupabaseConfigured || !supabase) return;
+  const { error } = await supabase.from('building_floorplans').delete().eq('id', id);
+  if (error) throw new Error(`Could not delete floorplan: ${error.message}`);
+}
+
 export async function saveSharedFloorplanToSupabase(floorplan: FloorplanDefinition): Promise<FloorplanDefinition> {
   if (!isSupabaseConfigured || !supabase) return floorplan;
 
