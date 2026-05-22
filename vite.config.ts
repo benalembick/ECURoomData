@@ -21,9 +21,6 @@ export default defineConfig(({ mode }) => {
     : null;
 
   return {
-    server: {
-      historyApiFallback: true,
-    },
     plugins: [
       react(),
       {
@@ -34,6 +31,15 @@ export default defineConfig(({ mode }) => {
           });
           server.middlewares.use('/api/backups', async (request, response) => {
             await handleBackupsApi(request, response, adminClient, { mountPath: '/api/backups' });
+          });
+          // SPA fallback: rewrite any path without a file extension to index.html so
+          // React handles routing, even when the path matches a real public/ directory.
+          server.middlewares.use((request, _response, next) => {
+            const url = (request.url ?? '/').split('?')[0];
+            if (!url.startsWith('/api/') && !url.startsWith('/@') && !/\.[a-zA-Z0-9]+$/.test(url)) {
+              request.url = '/index.html';
+            }
+            next();
           });
         },
       },

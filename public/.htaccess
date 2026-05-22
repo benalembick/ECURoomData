@@ -1,0 +1,10 @@
+Options -Indexes
+RewriteEngine On
+RewriteBase /
+
+# Let actual files (images, JS, CSS, etc.) be served directly
+RewriteCond %{REQUEST_FILENAME} -f
+RewriteRule ^ - [L]
+
+# Everything else (including directory paths like /floorplans/) goes to the React app
+RewriteRule ^ /index.html [L]
