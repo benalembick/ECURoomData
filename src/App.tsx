@@ -522,7 +522,7 @@ export function App() {
       setAuthProfile(profile);
       setAuthInitializing(false);
       void refreshRoomData();
-      const { data: savedColours, error: coloursError } = await supabase.from('business_units').select('name, reference_colour');
+      const { data: savedColours, error: coloursError } = await supabaseClient.from('business_units').select('name, reference_colour');
       if (!coloursError && savedColours?.length) {
         const colourByName = new Map(savedColours.map((row) => [row.name as string, row.reference_colour as string]));
         setIssueBusinessUnits((units) => units.map((unit) => colourByName.has(unit.name) ? { ...unit, colour: colourByName.get(unit.name)! } : unit));
@@ -2191,9 +2191,10 @@ function IssueAdmin({
     setBusinessUnits(businessUnits.map((u) => (u.id === unitId ? { ...u, colour } : u)));
     setIssues(issues.map((issue) => (issue.businessUnitId === unitId ? { ...issue, businessUnitColour: colour } : issue)));
     if (!supabase || !unit) return;
+    const supabaseClient = supabase;
     if (colourSaveTimerRef.current) clearTimeout(colourSaveTimerRef.current);
     colourSaveTimerRef.current = setTimeout(async () => {
-      const { error } = await supabase.from('business_units').upsert({ name: unit.name, reference_colour: colour }, { onConflict: 'name' });
+      const { error } = await supabaseClient.from('business_units').upsert({ name: unit.name, reference_colour: colour }, { onConflict: 'name' });
       if (error) setColourSaveError(`Could not save colour for ${unit.name}: ${error.message}`);
       else setColourSaveError('');
     }, 400);
