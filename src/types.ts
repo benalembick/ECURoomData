@@ -177,3 +177,70 @@ export interface ImportPreviewRow {
   action: 'create' | 'update' | 'error';
   issues: string[];
 }
+
+export type IssueCategoryName = 'AV/IT' | 'Operations' | 'FFE' | 'Building Defect' | 'Change Request' | 'Other';
+export type IssueStatusName = 'Open' | 'In-Progress' | 'Ready for User Inspection' | 'Closed' | string;
+
+export interface BusinessUnit {
+  id: string;
+  name: string;
+  colour: string;
+}
+
+export interface IssueCategory {
+  id: string;
+  name: IssueCategoryName | string;
+  sortOrder: number;
+}
+
+export interface IssueStatus {
+  id: string;
+  name: IssueStatusName;
+  sortOrder: number;
+}
+
+export interface IssueComment {
+  id: string;
+  issueId: string;
+  text: string;
+  author: string;
+  createdAt: string;
+  statusAtTime: IssueStatusName;
+}
+
+export interface IssueAttachmentReference {
+  id: string;
+  issueId: string;
+  label: string;
+  url?: string;
+  sourceUrl?: string;
+  sourceColumn?: string;
+}
+
+export interface Issue {
+  id: string;
+  issueId: string;
+  businessUnitId: string;
+  businessUnitName: string;
+  businessUnitColour: string;
+  originalWorksheet: string;
+  originalRowNumber: number;
+  dateIdentified: string;
+  contactPerson: string;
+  roomCode: string;
+  roomName: string;
+  subject: string;
+  detail: string;
+  priority: string;
+  photoReference: string;
+  sourceCategory: string;
+  category: IssueCategoryName | string;
+  isChangeRequest: boolean;
+  responsiblePerson: string;
+  status: IssueStatusName;
+  dateClosed: string;
+  aconexRef: string;
+  aconexFieldDefect: string;
+  metadata: Record<string, string>;
+  comments: IssueComment[];
+}

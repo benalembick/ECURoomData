@@ -1,6 +1,10 @@
-import { ChangeEvent, type FormEvent, type MouseEvent as ReactMouseEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import Papa from 'papaparse';
+import { jsPDF } from 'jspdf';
 import { z } from 'zod';
+import { getDocument, GlobalWorkerOptions, Util } from 'pdfjs-dist';
+import type { TextItem } from 'pdfjs-dist/types/src/display/api';
+import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import {
   AlertTriangle,
   Archive,
@@ -12,7 +16,9 @@ import {
   Copy,
   Database,
   Download,
+  ExternalLink,
   FileSpreadsheet,
+  FileText,
   Filter,
   GitBranch,
   History,
@@ -22,7 +28,12 @@ import {
   Layers3,
   ListChecks,
   LockKeyhole,
+  Map as MapIcon,
+  Maximize2,
+  Minus,
+  Move,
   Pencil,
+  MessageSquare,
   Plus,
   RefreshCcw,
   Search,
@@ -32,6 +43,7 @@ import {
   Upload,
   UserPlus,
   Users,
+  Wrench,
 } from 'lucide-react';
 import {
   attributeDefinitions as initialAttributeDefinitions,
@@ -44,7 +56,7 @@ import {
   rooms as initialRooms,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, AttributeGroup, Building, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Room, RoomPattern, TaskStatus, UserProfile } from './types';
+import type { AttributeDefinition, AttributeGroup, Building, BusinessUnit, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Issue, IssueAttachmentReference, IssueCategory, IssueComment, IssueStatus, Room, RoomPattern, TaskStatus, UserProfile } from './types';
 import { cn, downloadCsv, titleCase } from './lib/utils';
 import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -52,6 +64,7 @@ import { persistImportToSupabase, type PersistImportProgress, type PersistImport
 import { persistBuildingDetails, persistBuildingRemoval, persistCampusDetails, persistCampusMapping, persistCampusRemoval, type CampusMappingProgress } from './services/campusPersistence';
 import { createDataBackup, deleteDataBackup, getBackupOperation, listDataBackups, restoreDataBackup, type BackupOperation, type DataBackupSet } from './services/dataBackups';
 import { createAttributeGroup, deleteAttributeGroup, moveAttributeDefinitionsToGroup, renameAttributeGroup } from './services/fieldManagement';
+import { loadSharedFloorplansFromSupabase, saveSharedFloorplanToSupabase } from './services/floorplanPersistence';
 import { loadRoomDataFromSupabase, type RoomDataLoadProgress } from './services/roomData';
 import { getCurrentUserProfile, listUserProfiles, saveUserProfile, type SaveUserPayload } from './services/userManagement';
 import {
@@ -62,10 +75,28 @@ import {
   roomDataDictionaryByKey,
   roomDataDictionaryDefinitions,
 } from './data/roomDataDictionary';
+import { floorplans, type FloorplanDefinition, type FloorplanHotspot, type FloorplanZone } from './data/floorplans';
+import {
+  importedIssues,
+  issueAttachmentReferences as initialIssueAttachmentReferences,
+  issueBusinessUnits as initialIssueBusinessUnits,
+  issueCategories as initialIssueCategories,
+  issuesImportSummary,
+  issueStatuses as initialIssueStatuses,
+} from './data/issuesRegister';
+
+GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 type View =
   | 'dashboard'
+  | 'issues-dashboard'
+  | 'issues'
+  | 'issue-change-requests'
+  | 'issue-defects'
+  | 'issue-reports'
+  | 'issue-admin'
   | 'rooms'
+  | 'floorplans'
   | 'room-detail'
   | 'admin'
   | 'data-fields'
@@ -92,6 +123,7 @@ const roomSchema = z.object({
 const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'dashboard', label: 'Dashboard', icon: Home },
   { id: 'rooms', label: 'Room Search', icon: Search },
+  { id: 'floorplans', label: 'Floorplans', icon: MapIcon },
   { id: 'admin', label: 'Room Admin', icon: Settings2 },
   { id: 'data-fields', label: 'Data Fields', icon: Database },
   { id: 'locations', label: 'Campuses', icon: Building2 },
@@ -101,6 +133,16 @@ const navItems: { id: View; label: string; icon: typeof Home }[] = [
   { id: 'import', label: 'Import', icon: FileSpreadsheet },
   { id: 'backups', label: 'Backups', icon: Archive },
   { id: 'users', label: 'Users', icon: Users },
+];
+
+const issueTrackerViews: View[] = ['issues-dashboard', 'issues', 'issue-change-requests', 'issue-defects', 'issue-reports', 'issue-admin'];
+const issueTrackerNavItems: { id: View; label: string; icon: typeof Home }[] = [
+  { id: 'issues-dashboard', label: 'Issue Dashboard', icon: AlertTriangle },
+  { id: 'issues', label: 'All Issues', icon: ListChecks },
+  { id: 'issue-change-requests', label: 'Change Requests', icon: GitBranch },
+  { id: 'issue-defects', label: 'Defects', icon: Wrench },
+  { id: 'issue-reports', label: 'Issue Reports', icon: FileText },
+  { id: 'issue-admin', label: 'Issue Admin', icon: Settings2 },
 ];
 
 const ecuLogoUrl = 'https://www.ecu.edu.au/__data/assets/image/0004/1100389/ecu-logo.png';
@@ -308,8 +350,36 @@ function floorSortValue(floor: string) {
   return 1000;
 }
 
+function viewFromLocation(): View {
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/issues') return 'issues-dashboard';
+  if (path === '/issues/all') return 'issues';
+  if (path === '/issues/change-requests') return 'issue-change-requests';
+  if (path === '/issues/defects') return 'issue-defects';
+  if (path === '/issues/reports') return 'issue-reports';
+  if (path === '/issues/admin') return 'issue-admin';
+  if (path === '/rooms') return 'rooms';
+  if (path === '/floorplans') return 'floorplans';
+  return 'dashboard';
+}
+
+function searchFromLocation() {
+  return new URLSearchParams(window.location.search).get('search') ?? '';
+}
+
+type IssueListFilter = {
+  query?: string;
+  unit?: string;
+  priority?: string;
+  status?: string;
+  category?: string;
+  responsible?: string;
+  quickFilter?: string;
+};
+
 export function App() {
-  const [view, setView] = useState<View>('dashboard');
+  const [view, setView] = useState<View>(() => viewFromLocation());
+  const [roomSearchQuery, setRoomSearchQuery] = useState(() => searchFromLocation());
   const [rooms, setRooms] = useState<Room[]>(initialRooms);
   const [campusesData, setCampusesData] = useState<Campus[]>(initialCampuses);
   const [buildingsData, setBuildingsData] = useState<Building[]>(initialBuildings);
@@ -317,6 +387,12 @@ export function App() {
   const [attributeDefinitions, setAttributeDefinitions] = useState<AttributeDefinition[]>(initialAttributeDefinitions);
   const [attributeGroups, setAttributeGroups] = useState<AttributeGroup[]>(() => getAttributeGroupsFromDefinitions(initialAttributeDefinitions));
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(initialChangeRequests);
+  const [issues, setIssues] = useState<Issue[]>(importedIssues);
+  const [issueBusinessUnits, setIssueBusinessUnits] = useState<BusinessUnit[]>(initialIssueBusinessUnits);
+  const [issueCategoriesData, setIssueCategoriesData] = useState<IssueCategory[]>(initialIssueCategories);
+  const [issueStatusesData, setIssueStatusesData] = useState<IssueStatus[]>(initialIssueStatuses);
+  const [issueAttachments] = useState<IssueAttachmentReference[]>(initialIssueAttachmentReferences);
+  const [issueListFilter, setIssueListFilter] = useState<IssueListFilter>({});
   const [selectedRoomId, setSelectedRoomId] = useState(initialRooms[0].id);
   const [authEmail, setAuthEmail] = useState('');
   const [authPassword, setAuthPassword] = useState('');
@@ -338,6 +414,42 @@ export function App() {
   const canManageUsers = authProfile?.role === 'admin';
   const canManageFieldConfig = !isSupabaseConfigured || canManageUsers;
   const visibleNavItems = navItems.filter((item) => !['users', 'backups', 'data-fields'].includes(item.id) || (item.id === 'data-fields' ? canManageFieldConfig : canManageUsers));
+
+  const navigateToView = useCallback((nextView: View, searchValue = '') => {
+    setView(nextView);
+    if (nextView === 'rooms') {
+      setRoomSearchQuery(searchValue);
+      const query = searchValue ? `?search=${encodeURIComponent(searchValue)}` : '';
+      window.history.pushState({}, '', `/rooms${query}`);
+      return;
+    }
+    if (nextView === 'floorplans') {
+      window.history.pushState({}, '', '/floorplans');
+      return;
+    }
+    const issuePaths: Partial<Record<View, string>> = {
+      'issues-dashboard': '/issues',
+      issues: '/issues/all',
+      'issue-change-requests': '/issues/change-requests',
+      'issue-defects': '/issues/defects',
+      'issue-reports': '/issues/reports',
+      'issue-admin': '/issues/admin',
+    };
+    if (issuePaths[nextView]) {
+      window.history.pushState({}, '', issuePaths[nextView]);
+      return;
+    }
+    window.history.pushState({}, '', '/');
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = () => {
+      setView(viewFromLocation());
+      setRoomSearchQuery(searchFromLocation());
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
 
   const refreshRoomData = useCallback(async () => {
     if (!supabase) return;
@@ -485,7 +597,22 @@ export function App() {
 
   const openSummarySearch = (summaryLabel: string) => {
     setSummaryFilter(summaryLabel);
-    setView('rooms');
+    navigateToView('rooms');
+  };
+
+  const openRoomSearchForCode = (roomCode: string) => {
+    setSummaryFilter(null);
+    navigateToView('rooms', roomCode);
+  };
+
+  const openRoomProfileForCode = (roomCode: string) => {
+    const matchingRoom = rooms.find((room) => normalizeRoomCodeKey(room.roomCode) === normalizeRoomCodeKey(roomCode));
+    if (!matchingRoom) {
+      openRoomSearchForCode(roomCode);
+      return;
+    }
+    setSelectedRoomId(matchingRoom.id);
+    setView('room-detail');
   };
 
   return (
@@ -546,7 +673,7 @@ export function App() {
                   key={item.id}
                   onClick={() => {
                     if (item.id === 'rooms') setSummaryFilter(null);
-                    setView(item.id);
+                    navigateToView(item.id);
                   }}
                   className={cn(
                     'flex min-w-fit items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition lg:w-full',
@@ -560,6 +687,45 @@ export function App() {
                 </button>
               );
             })}
+            <div className="min-w-fit pt-1 lg:w-full lg:border-t lg:border-slate-200 lg:pt-3">
+              <button
+                type="button"
+                onClick={() => navigateToView('issues-dashboard')}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-md px-3 py-2 text-sm font-semibold transition',
+                  issueTrackerViews.includes(view)
+                    ? 'bg-ecu-mint text-ecu-black'
+                    : 'text-slate-600 hover:bg-slate-50 hover:text-slate-950',
+                )}
+              >
+                <AlertTriangle size={18} />
+                <span className="flex-1 text-left">Issue tracker</span>
+                {issueTrackerViews.includes(view) && <ChevronDown size={15} />}
+              </button>
+              {issueTrackerViews.includes(view) && (
+                <div className="mt-1 flex gap-1 pl-2 lg:block lg:space-y-1 lg:pl-6">
+                  {issueTrackerNavItems.map((subItem) => {
+                    const SubIcon = subItem.icon;
+                    return (
+                      <button
+                        key={subItem.id}
+                        type="button"
+                        onClick={() => navigateToView(subItem.id)}
+                        className={cn(
+                          'flex min-w-fit items-center gap-2 rounded-md px-3 py-2 text-sm font-semibold transition lg:w-full',
+                          view === subItem.id
+                            ? 'bg-white text-ecu-black ring-1 ring-ecu-teal/30'
+                            : 'text-slate-500 hover:bg-slate-50 hover:text-slate-950',
+                        )}
+                      >
+                        <SubIcon size={15} />
+                        {subItem.label}
+                      </button>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </nav>
           <div className="hidden border-t border-slate-200 p-4 text-sm text-slate-600 lg:block">
             <p className="font-semibold text-ecu-black">Role model</p>
@@ -569,7 +735,83 @@ export function App() {
 
         <main className="p-4 sm:p-6 lg:p-8">
           {view === 'dashboard' && <Dashboard rooms={rooms} changeRequests={changeRequests} openRoom={openRoom} openSummarySearch={openSummarySearch} roomDataLoading={roomDataLoading} />}
-          {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} />}
+          {view === 'issues-dashboard' && (
+            <IssuesDashboard
+              issues={issues}
+              businessUnits={issueBusinessUnits}
+              categories={issueCategoriesData}
+              statuses={issueStatusesData}
+              openAllIssues={() => {
+                setIssueListFilter({});
+                navigateToView('issues');
+              }}
+              openFilteredIssues={(filter) => {
+                setIssueListFilter(filter);
+                navigateToView('issues');
+              }}
+            />
+          )}
+          {view === 'issues' && (
+            <IssuesRegisterPage
+              mode="all"
+              issues={issues}
+              setIssues={setIssues}
+              businessUnits={issueBusinessUnits}
+              categories={issueCategoriesData}
+              statuses={issueStatusesData}
+              attachments={issueAttachments}
+              rooms={rooms}
+              openRoomProfile={openRoomProfileForCode}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+              initialFilter={issueListFilter}
+            />
+          )}
+          {view === 'issue-change-requests' && (
+            <IssuesRegisterPage
+              mode="change-requests"
+              issues={issues}
+              setIssues={setIssues}
+              businessUnits={issueBusinessUnits}
+              categories={issueCategoriesData}
+              statuses={issueStatusesData}
+              attachments={issueAttachments}
+              rooms={rooms}
+              openRoomProfile={openRoomProfileForCode}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+              initialFilter={issueListFilter}
+            />
+          )}
+          {view === 'issue-defects' && (
+            <IssuesRegisterPage
+              mode="defects"
+              issues={issues}
+              setIssues={setIssues}
+              businessUnits={issueBusinessUnits}
+              categories={issueCategoriesData}
+              statuses={issueStatusesData}
+              attachments={issueAttachments}
+              rooms={rooms}
+              openRoomProfile={openRoomProfileForCode}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+              initialFilter={issueListFilter}
+            />
+          )}
+          {view === 'issue-reports' && <IssueReports issues={issues} businessUnits={issueBusinessUnits} categories={issueCategoriesData} statuses={issueStatusesData} />}
+          {view === 'issue-admin' && (
+            <IssueAdmin
+              businessUnits={issueBusinessUnits}
+              setBusinessUnits={setIssueBusinessUnits}
+              categories={issueCategoriesData}
+              setCategories={setIssueCategoriesData}
+              statuses={issueStatusesData}
+              setStatuses={setIssueStatusesData}
+              issues={issues}
+              setIssues={setIssues}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+            />
+          )}
+          {view === 'rooms' && <RoomSearch rooms={rooms} campuses={campusesData} attributes={attributeDefinitions} openRoom={openRoom} roomDataLoading={roomDataLoading} loadProgress={dataLoadProgress} summaryFilter={summaryFilter} clearSummaryFilter={() => setSummaryFilter(null)} initialSearch={roomSearchQuery} />}
+          {view === 'floorplans' && <FloorplansPage rooms={rooms} campuses={campusesData} buildings={buildingsData} openRoomProfile={openRoomProfileForCode} />}
           {view === 'room-detail' && <RoomDetail room={selectedRoom} rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} openRoomAdmin={openRoomAdmin} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'admin' && <Admin rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} campuses={campusesData} buildings={buildingsData} patterns={roomPatterns} initialRoomId={selectedRoomId} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'data-fields' && canManageFieldConfig && <DataFieldManagement attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} groups={attributeGroups} setGroups={setAttributeGroups} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
@@ -688,7 +930,7 @@ function AuthRequiredOverlay({ message, onClose }: { message: string; onClose: (
   );
 }
 
-function PageHeader({ title, description, action }: { title: string; description: string; action?: React.ReactNode }) {
+function PageHeader({ title, description, action }: { title: string; description: string; action?: ReactNode }) {
   return (
     <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
       <div>
@@ -1437,6 +1679,1058 @@ function LoadingPanelMessage({ label }: { label: string }) {
   );
 }
 
+function IssuesDashboard({
+  issues,
+  businessUnits,
+  categories,
+  statuses,
+  openAllIssues,
+  openFilteredIssues,
+}: {
+  issues: Issue[];
+  businessUnits: BusinessUnit[];
+  categories: IssueCategory[];
+  statuses: IssueStatus[];
+  openAllIssues: () => void;
+  openFilteredIssues: (filter: IssueListFilter) => void;
+}) {
+  const openIssues = issues.filter((issue) => issue.status !== 'Closed');
+  const categoryCounts = categories.map((category) => ({
+    label: category.name,
+    count: issues.filter((issue) => issue.category === category.name).length,
+    colour: getIssueCategoryChartColour(category.name),
+    filter: { category: category.name },
+  }));
+  const statusCounts = statuses.map((status) => ({
+    label: status.name,
+    count: issues.filter((issue) => issue.status === status.name).length,
+    colour: getIssueStatusChartColour(status.name),
+    filter: { status: status.name },
+  }));
+  const unitCounts = businessUnits.map((unit) => ({
+    label: unit.name,
+    count: issues.filter((issue) => issue.businessUnitId === unit.id).length,
+    colour: getBusinessUnitChartColour(unit.name, unit.colour),
+    filter: { unit: unit.id },
+  }));
+  const priorityCounts = orderIssueChartRows(countBy(issues, (issue) => issue.priority || 'Unspecified'), issuePriorityChartOrder)
+    .slice(0, 6)
+    .map((row) => ({ ...row, colour: getIssuePriorityChartColour(row.label), filter: { priority: row.label } }));
+  const agingItems = openIssues
+    .map((issue) => ({ issue, age: issueAgeDays(issue) }))
+    .sort((a, b) => b.age - a.age)
+    .slice(0, 8);
+
+  return (
+    <>
+      <PageHeader
+        title="Issues Register"
+        description={`Imported ${issuesImportSummary.issueCount.toLocaleString()} post occupancy issues from ${issuesImportSummary.businessUnitCount} worksheet tabs. Dashboard metrics use the source tab colours.`}
+        action={<button className="btn-primary" onClick={openAllIssues}><ListChecks size={16} /> All Issues</button>}
+      />
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+        <MetricCard icon={AlertTriangle} label="Total issues" value={issues.length} detail={`${businessUnits.length} business units`} />
+        <MetricCard icon={ListChecks} label="Open issues" value={statusCounts.find((item) => item.label === 'Open')?.count ?? 0} detail={`${openIssues.length} active items`} />
+        <MetricCard icon={RefreshCcw} label="In-progress" value={statusCounts.find((item) => item.label === 'In-Progress')?.count ?? 0} detail="Currently being actioned" />
+        <MetricCard icon={CheckCircle2} label="Ready for inspection" value={statusCounts.find((item) => item.label === 'Ready for User Inspection')?.count ?? 0} detail="Waiting on user review" />
+        <MetricCard icon={ClipboardCheck} label="Closed issues" value={statusCounts.find((item) => item.label === 'Closed')?.count ?? 0} detail="Completed or accepted" />
+        <MetricCard icon={GitBranch} label="Change requests" value={issues.filter((issue) => issue.isChangeRequest).length} detail="Normalised from category and subject" />
+        <MetricCard icon={Wrench} label="Defects" value={issues.filter((issue) => !issue.isChangeRequest).length} detail="Grouped by category" />
+        <MetricCard icon={History} label="Aging open items" value={agingItems.filter((item) => item.age >= 30).length} detail="Open for 30+ days" />
+      </section>
+
+      <section className="mt-6 grid gap-6 xl:grid-cols-2">
+        <IssueBarChart title="Issues by Business Unit" rows={unitCounts} onSelect={(row) => row.filter && openFilteredIssues(row.filter)} />
+        <IssueDonutChart title="Issues by Status" rows={orderIssueChartRows(statusCounts, issueStatusChartOrder)} onSelect={(row) => row.filter && openFilteredIssues(row.filter)} />
+        <IssueBarChart title="Issues by Category" rows={orderIssueChartRows(categoryCounts, issueCategoryChartOrder)} onSelect={(row) => row.filter && openFilteredIssues(row.filter)} />
+        <IssueDonutChart title="Issues by Priority" rows={priorityCounts} onSelect={(row) => row.filter && openFilteredIssues(row.filter)} />
+      </section>
+
+      <section className="mt-6">
+        <div className="panel rounded-lg p-4">
+          <h3 className="font-bold text-slate-950">Oldest open items</h3>
+          <div className="mt-3 divide-y divide-slate-200">
+            {agingItems.map(({ issue, age }) => (
+              <div key={issue.id} className="py-3 text-sm">
+                <div className="flex items-center justify-between gap-3">
+                  <span className="font-bold text-slate-950">{issue.issueId}</span>
+                  <span className="badge border-amber-200 bg-amber-50 text-amber-700">{age} days</span>
+                </div>
+                <p className="mt-1 text-slate-700">{issue.subject || issue.detail || 'No subject recorded'}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+type IssueRegisterMode = 'all' | 'change-requests' | 'defects';
+type IssueSortKey = 'businessUnitName' | 'issueId' | 'dateIdentified' | 'contactPerson' | 'roomCode' | 'roomName' | 'subject' | 'priority' | 'category' | 'responsiblePerson' | 'status' | 'isChangeRequest';
+
+function IssuesRegisterPage({
+  mode,
+  issues,
+  setIssues,
+  businessUnits,
+  categories,
+  statuses,
+  attachments,
+  rooms,
+  openRoomProfile,
+  requireAuthenticatedEdit,
+  initialFilter,
+}: {
+  mode: IssueRegisterMode;
+  issues: Issue[];
+  setIssues: (issues: Issue[]) => void;
+  businessUnits: BusinessUnit[];
+  categories: IssueCategory[];
+  statuses: IssueStatus[];
+  attachments: IssueAttachmentReference[];
+  rooms: Room[];
+  openRoomProfile: (roomCode: string) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  initialFilter: IssueListFilter;
+}) {
+  const [query, setQuery] = useState('');
+  const [unit, setUnit] = useState('All');
+  const [priority, setPriority] = useState('All');
+  const [status, setStatus] = useState('All');
+  const [category, setCategory] = useState('All');
+  const [responsible, setResponsible] = useState('All');
+  const [quickFilter, setQuickFilter] = useState('All');
+  const [sortKey, setSortKey] = useState<IssueSortKey>('dateIdentified');
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('desc');
+  const [page, setPage] = useState(1);
+  const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+  const pageSize = 25;
+  const deferredQuery = useDeferredValue(query);
+  const visibleModeIssues = mode === 'change-requests'
+    ? issues.filter((issue) => issue.isChangeRequest)
+    : mode === 'defects'
+      ? issues.filter((issue) => !issue.isChangeRequest)
+      : issues;
+
+  const priorityOptions = useMemo(() => {
+    const options = Array.from(new Set(issues.map((issue) => issue.priority).filter(Boolean))).sort();
+    if (issues.some((issue) => !issue.priority)) options.push('Unspecified');
+    return ['All', ...options];
+  }, [issues]);
+  const responsibleOptions = useMemo(() => ['All', ...Array.from(new Set(issues.map((issue) => issue.responsiblePerson).filter(Boolean))).sort()], [issues]);
+
+  useEffect(() => {
+    setQuery(initialFilter.query ?? '');
+    setUnit(initialFilter.unit ?? 'All');
+    setPriority(initialFilter.priority ?? 'All');
+    setStatus(initialFilter.status ?? 'All');
+    setCategory(initialFilter.category ?? 'All');
+    setResponsible(initialFilter.responsible ?? 'All');
+    setQuickFilter(initialFilter.quickFilter ?? 'All');
+  }, [initialFilter]);
+
+  const filteredIssues = useMemo(() => {
+    const search = deferredQuery.trim().toLowerCase();
+    return visibleModeIssues
+      .filter((issue) => unit === 'All' || issue.businessUnitId === unit)
+      .filter((issue) => priority === 'All' || (priority === 'Unspecified' ? !issue.priority : issue.priority === priority))
+      .filter((issue) => status === 'All' || issue.status === status)
+      .filter((issue) => category === 'All' || issue.category === category)
+      .filter((issue) => responsible === 'All' || issue.responsiblePerson === responsible)
+      .filter((issue) => matchesIssueQuickFilter(issue, quickFilter))
+      .filter((issue) => {
+        if (!search) return true;
+        return [
+          issue.issueId,
+          issue.businessUnitName,
+          issue.contactPerson,
+          issue.roomCode,
+          issue.roomName,
+          issue.subject,
+          issue.detail,
+          issue.priority,
+          issue.category,
+          issue.responsiblePerson,
+          issue.status,
+          issue.sourceCategory,
+          ...Object.values(issue.metadata),
+        ].join(' ').toLowerCase().includes(search);
+      })
+      .sort((a, b) => compareIssueField(a, b, sortKey, sortDirection));
+  }, [category, deferredQuery, priority, quickFilter, responsible, sortDirection, sortKey, status, unit, visibleModeIssues]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [category, deferredQuery, priority, quickFilter, responsible, status, unit, mode]);
+
+  const pageCount = Math.max(1, Math.ceil(filteredIssues.length / pageSize));
+  const pagedIssues = filteredIssues.slice((page - 1) * pageSize, page * pageSize);
+  const selectedIssue = issues.find((issue) => issue.id === selectedIssueId) ?? null;
+
+  const updateIssue = (nextIssue: Issue) => {
+    setIssues(issues.map((issue) => (issue.id === nextIssue.id ? nextIssue : issue)));
+  };
+
+  const title = mode === 'change-requests' ? 'Change Requests' : mode === 'defects' ? 'Defects' : 'All Issues';
+  const activeFilterLabels = [
+    unit !== 'All' ? `Business unit: ${businessUnits.find((item) => item.id === unit)?.name ?? unit}` : '',
+    priority !== 'All' ? `Priority: ${priority}` : '',
+    status !== 'All' ? `Status: ${status}` : '',
+    category !== 'All' ? `Category: ${category}` : '',
+    responsible !== 'All' ? `Responsible: ${responsible}` : '',
+    quickFilter !== 'All' ? quickFilter : '',
+    query ? `Search: ${query}` : '',
+  ].filter(Boolean);
+
+  return (
+    <>
+      <PageHeader
+        title={title}
+        description="Search, sort, triage, export, comment, and update imported post occupancy issues."
+        action={<button className="btn-secondary" onClick={() => exportIssuesCsv(filteredIssues)}><Download size={16} /> Export CSV</button>}
+      />
+      {activeFilterLabels.length > 0 && (
+        <div className="mb-4 flex flex-wrap items-center gap-2 rounded-md border border-ecu-teal/30 bg-ecu-mint px-3 py-2 text-sm text-ecu-black">
+          <span className="font-semibold">Dashboard filter</span>
+          {activeFilterLabels.map((label) => <span key={label} className="badge border-ecu-teal/30 bg-white text-slate-700">{label}</span>)}
+        </div>
+      )}
+      <div className="panel rounded-lg p-4">
+        <div className="grid gap-3 xl:grid-cols-[1.4fr_1fr_1fr_1fr_1fr]">
+          <label className="relative block">
+            <span className="label">Global search</span>
+            <Search className="absolute left-3 top-[34px] text-slate-400" size={18} />
+            <input className="input mt-1 pl-10" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Issue, room, subject, contact, responsible..." />
+          </label>
+          <div>
+            <label className="label">Business unit</label>
+            <select className="input mt-1" value={unit} onChange={(event) => setUnit(event.target.value)}>
+              <option value="All">All</option>
+              {businessUnits.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+            </select>
+          </div>
+          <FilterSelect label="Priority" value={priority} setValue={setPriority} options={priorityOptions} />
+          <FilterSelect label="Status" value={status} setValue={setStatus} options={['All', ...statuses.map((item) => item.name)]} />
+          <FilterSelect label="Category" value={category} setValue={setCategory} options={['All', ...categories.map((item) => item.name)]} />
+        </div>
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_1fr]">
+          <FilterSelect label="Responsible" value={responsible} setValue={setResponsible} options={responsibleOptions} />
+          <div>
+            <label className="label">Quick filters</label>
+            <div className="mt-1 flex flex-wrap gap-2">
+              {issueQuickFilters.map((filter) => (
+                <button
+                  key={filter}
+                  className={cn('badge transition', quickFilter === filter ? 'border-ecu-teal bg-ecu-mint text-ecu-black' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50')}
+                  onClick={() => setQuickFilter(filter)}
+                >
+                  {filter}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 panel overflow-hidden rounded-lg">
+        <div className="flex flex-col gap-3 border-b border-slate-200 p-4 text-sm text-slate-600 md:flex-row md:items-center md:justify-between">
+          <p>Showing {pagedIssues.length.toLocaleString()} of {filteredIssues.length.toLocaleString()} issue{filteredIssues.length === 1 ? '' : 's'}</p>
+          <div className="flex items-center gap-2">
+            <button className="btn-secondary py-1" disabled={page <= 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>Previous</button>
+            <span className="font-semibold text-slate-700">Page {page} of {pageCount}</span>
+            <button className="btn-secondary py-1" disabled={page >= pageCount} onClick={() => setPage((current) => Math.min(pageCount, current + 1))}>Next</button>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1280px] text-left text-sm">
+            <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+              <tr>
+                {issueColumns.map((column) => (
+                  <th key={column.key} className="px-3 py-3">
+                    <button className="inline-flex items-center gap-1 font-bold" onClick={() => {
+                      if (sortKey === column.key) setSortDirection((current) => (current === 'asc' ? 'desc' : 'asc'));
+                      else {
+                        setSortKey(column.key);
+                        setSortDirection('asc');
+                      }
+                    }}>
+                      {column.label}
+                      <ChevronDown size={14} className={cn(sortKey === column.key && sortDirection === 'asc' && 'rotate-180')} />
+                    </button>
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {pagedIssues.map((issue) => {
+                const roomExists = Boolean(issue.roomCode && rooms.some((room) => normalizeRoomCodeKey(room.roomCode) === normalizeRoomCodeKey(issue.roomCode)));
+                return (
+                  <tr key={issue.id} className="align-top hover:bg-slate-50">
+                    <td className="px-3 py-3">
+                      <BusinessUnitBadge name={issue.businessUnitName} colour={issue.businessUnitColour} />
+                    </td>
+                    <td className="px-3 py-3 font-bold text-slate-950">
+                      <button className="text-left hover:text-ecu-teal" onClick={() => setSelectedIssueId(issue.id)}>{issue.issueId}</button>
+                    </td>
+                    <td className="px-3 py-3 text-slate-600">{formatIssueDate(issue.dateIdentified)}</td>
+                    <td className="px-3 py-3 text-slate-700">{issue.contactPerson || '-'}</td>
+                    <td className="px-3 py-3">
+                      {issue.roomCode ? (
+                        <button
+                          className={cn('font-bold', roomExists ? 'text-ecu-teal hover:underline' : 'text-slate-700')}
+                          onClick={() => (roomExists ? openRoomProfile(issue.roomCode) : setSelectedIssueId(issue.id))}
+                        >
+                          {issue.roomCode}
+                        </button>
+                      ) : '-'}
+                    </td>
+                    <td className="px-3 py-3 text-slate-700">{issue.roomName || '-'}</td>
+                    <td className="max-w-[320px] px-3 py-3">
+                      <button className="text-left font-semibold text-slate-950 hover:text-ecu-teal" onClick={() => setSelectedIssueId(issue.id)}>
+                        {issue.subject || issue.detail || 'No subject'}
+                      </button>
+                    </td>
+                    <td className="px-3 py-3"><PriorityBadge priority={issue.priority} /></td>
+                    <td className="px-3 py-3"><IssueCategoryBadge category={issue.category} /></td>
+                    <td className="px-3 py-3 text-slate-700">{issue.responsiblePerson || '-'}</td>
+                    <td className="px-3 py-3"><StatusBadge status={issue.status} /></td>
+                    <td className="px-3 py-3">{issue.isChangeRequest ? <span className="badge border-purple-200 bg-purple-50 text-purple-700">Yes</span> : <span className="badge border-slate-200 bg-slate-50 text-slate-600">No</span>}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {selectedIssue && (
+        <IssueDetailModal
+          issue={selectedIssue}
+          categories={categories}
+          statuses={statuses}
+          attachments={attachments.filter((attachment) => attachment.issueId === selectedIssue.id)}
+          roomExists={Boolean(selectedIssue.roomCode && rooms.some((room) => normalizeRoomCodeKey(room.roomCode) === normalizeRoomCodeKey(selectedIssue.roomCode)))}
+          openRoomProfile={openRoomProfile}
+          updateIssue={updateIssue}
+          close={() => setSelectedIssueId(null)}
+          requireAuthenticatedEdit={requireAuthenticatedEdit}
+        />
+      )}
+    </>
+  );
+}
+
+function IssueReports({ issues, businessUnits, categories, statuses }: { issues: Issue[]; businessUnits: BusinessUnit[]; categories: IssueCategory[]; statuses: IssueStatus[] }) {
+  const activeIssues = issues.filter((issue) => issue.status !== 'Closed');
+  const exportDashboardPdf = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('ECU Issues Register Dashboard Summary', 14, 18);
+    doc.setFontSize(10);
+    [
+      `Total issues: ${issues.length}`,
+      `Open issues: ${issues.filter((issue) => issue.status === 'Open').length}`,
+      `In-progress issues: ${issues.filter((issue) => issue.status === 'In-Progress').length}`,
+      `Ready for user inspection: ${issues.filter((issue) => issue.status === 'Ready for User Inspection').length}`,
+      `Closed issues: ${issues.filter((issue) => issue.status === 'Closed').length}`,
+      `Change requests: ${issues.filter((issue) => issue.isChangeRequest).length}`,
+    ].forEach((line, index) => doc.text(line, 14, 32 + index * 8));
+    doc.text('Issues by business unit', 14, 92);
+    businessUnits.slice(0, 20).forEach((unit, index) => doc.text(`${unit.name}: ${issues.filter((issue) => issue.businessUnitId === unit.id).length}`, 14, 104 + index * 6));
+    doc.save('issues-dashboard-summary.pdf');
+  };
+  const exportActiveIssuePdf = () => {
+    const doc = new jsPDF();
+    doc.setFontSize(16);
+    doc.text('Active Issue Detail Report', 14, 18);
+    doc.setFontSize(9);
+    let y = 30;
+    activeIssues.slice(0, 45).forEach((issue) => {
+      doc.text(`${issue.issueId} | ${issue.status} | ${issue.category}`, 14, y);
+      y += 5;
+      doc.text(doc.splitTextToSize(`${issue.businessUnitName} | ${issue.roomCode || 'No room'} | ${issue.subject || issue.detail}`, 180), 14, y);
+      y += 12;
+      if (y > 275) {
+        doc.addPage();
+        y = 18;
+      }
+    });
+    doc.save('active-issue-detail-report.pdf');
+  };
+
+  return (
+    <>
+      <PageHeader title="Issue Reports" description="Export dashboard summaries, filtered data, and active issue detail packs." />
+      <section className="grid gap-5 lg:grid-cols-3">
+        <ReportCard title="Filtered CSV" detail="Exports the complete issue register dataset for offline sorting and reporting." action={<button className="btn-primary" onClick={() => exportIssuesCsv(issues)}><Download size={16} /> Export CSV</button>} />
+        <ReportCard title="Dashboard PDF" detail="Creates a PDF summary of headline metrics and business unit counts." action={<button className="btn-primary" onClick={exportDashboardPdf}><FileText size={16} /> Export PDF</button>} />
+        <ReportCard title="Issue detail PDF" detail="Creates a PDF pack for active open, in-progress, and inspection items." action={<button className="btn-primary" onClick={exportActiveIssuePdf}><FileText size={16} /> Export PDF</button>} />
+      </section>
+      <section className="mt-6 grid gap-6 xl:grid-cols-2">
+        <IssueBarChart title="Report categories" rows={categories.map((category) => ({ label: category.name, count: issues.filter((issue) => issue.category === category.name).length }))} />
+        <IssueBarChart title="Report statuses" rows={statuses.map((status) => ({ label: status.name, count: issues.filter((issue) => issue.status === status.name).length }))} />
+      </section>
+    </>
+  );
+}
+
+function IssueAdmin({
+  businessUnits,
+  setBusinessUnits,
+  categories,
+  setCategories,
+  statuses,
+  setStatuses,
+  issues,
+  setIssues,
+  requireAuthenticatedEdit,
+}: {
+  businessUnits: BusinessUnit[];
+  setBusinessUnits: (units: BusinessUnit[]) => void;
+  categories: IssueCategory[];
+  setCategories: (categories: IssueCategory[]) => void;
+  statuses: IssueStatus[];
+  setStatuses: (statuses: IssueStatus[]) => void;
+  issues: Issue[];
+  setIssues: (issues: Issue[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
+  const commenterNames = Array.from(new Set(issues.flatMap((issue) => issue.comments.map((comment) => comment.author)).filter(Boolean))).sort();
+  const updateUnitColour = (unitId: string, colour: string) => {
+    if (!requireAuthenticatedEdit('manage business unit colours')) return;
+    setBusinessUnits(businessUnits.map((unit) => (unit.id === unitId ? { ...unit, colour } : unit)));
+    setIssues(issues.map((issue) => (issue.businessUnitId === unitId ? { ...issue, businessUnitColour: colour } : issue)));
+  };
+  const addCategory = () => {
+    if (!requireAuthenticatedEdit('manage issue categories')) return;
+    const name = window.prompt('New category name');
+    if (!name) return;
+    setCategories([...categories, { id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, sortOrder: categories.length }]);
+  };
+  const addStatus = () => {
+    if (!requireAuthenticatedEdit('manage issue statuses')) return;
+    const name = window.prompt('New status name');
+    if (!name) return;
+    setStatuses([...statuses, { id: name.toLowerCase().replace(/[^a-z0-9]+/g, '-'), name, sortOrder: statuses.length }]);
+  };
+
+  return (
+    <>
+      <PageHeader title="Issue Admin" description="Manage normalised categories, status options, business unit colours, and commenter names." />
+      <section className="grid gap-6 xl:grid-cols-2">
+        <div className="panel rounded-lg p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-bold text-slate-950">Categories</h3>
+            <button className="btn-secondary py-1" onClick={addCategory}><Plus size={15} /> Add</button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {categories.map((category) => <IssueCategoryBadge key={category.id} category={category.name} />)}
+          </div>
+        </div>
+        <div className="panel rounded-lg p-4">
+          <div className="flex items-center justify-between gap-3">
+            <h3 className="font-bold text-slate-950">Statuses</h3>
+            <button className="btn-secondary py-1" onClick={addStatus}><Plus size={15} /> Add</button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {statuses.map((status) => <StatusBadge key={status.id} status={status.name} />)}
+          </div>
+        </div>
+      </section>
+      <section className="mt-6 grid gap-6 xl:grid-cols-[1fr_0.7fr]">
+        <div className="panel rounded-lg p-4">
+          <h3 className="font-bold text-slate-950">Business unit colours</h3>
+          <div className="mt-4 grid gap-3 md:grid-cols-2">
+            {businessUnits.map((unit) => (
+              <label key={unit.id} className="flex items-center justify-between gap-3 rounded-md border border-slate-200 p-3">
+                <BusinessUnitBadge name={unit.name} colour={unit.colour} />
+                <input type="color" value={unit.colour} onChange={(event) => updateUnitColour(unit.id, event.target.value)} aria-label={`Colour for ${unit.name}`} />
+              </label>
+            ))}
+          </div>
+        </div>
+        <div className="panel rounded-lg p-4">
+          <h3 className="font-bold text-slate-950">Commenter names</h3>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {commenterNames.map((name) => <span key={name} className="badge border-slate-200 bg-slate-50 text-slate-700">{name}</span>)}
+            {!commenterNames.length && <p className="text-sm text-slate-600">No comments recorded yet.</p>}
+          </div>
+        </div>
+      </section>
+    </>
+  );
+}
+
+function IssueDetailModal({
+  issue,
+  categories,
+  statuses,
+  attachments,
+  roomExists,
+  openRoomProfile,
+  updateIssue,
+  close,
+  requireAuthenticatedEdit,
+}: {
+  issue: Issue;
+  categories: IssueCategory[];
+  statuses: IssueStatus[];
+  attachments: IssueAttachmentReference[];
+  roomExists: boolean;
+  openRoomProfile: (roomCode: string) => void;
+  updateIssue: (issue: Issue) => void;
+  close: () => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+}) {
+  const [commentText, setCommentText] = useState('');
+  const [commentAuthor, setCommentAuthor] = useState('Current user');
+  const setCategory = (category: string) => {
+    if (!requireAuthenticatedEdit('edit issue category')) return;
+    updateIssue({ ...issue, category, isChangeRequest: category === 'Change Request' ? true : issue.isChangeRequest });
+  };
+  const setStatus = (status: string) => {
+    if (!requireAuthenticatedEdit('edit issue status')) return;
+    updateIssue({ ...issue, status });
+  };
+  const setChangeRequest = (isChangeRequest: boolean) => {
+    if (!requireAuthenticatedEdit('mark issue change request flag')) return;
+    updateIssue({ ...issue, isChangeRequest, category: isChangeRequest ? 'Change Request' : issue.category });
+  };
+  const addComment = () => {
+    if (!commentText.trim()) return;
+    if (!requireAuthenticatedEdit('add issue comments')) return;
+    const comment: IssueComment = {
+      id: `${issue.id}-comment-${Date.now()}`,
+      issueId: issue.id,
+      text: commentText.trim(),
+      author: commentAuthor.trim() || 'Current user',
+      createdAt: new Date().toISOString(),
+      statusAtTime: issue.status,
+    };
+    updateIssue({ ...issue, comments: [comment, ...issue.comments] });
+    setCommentText('');
+  };
+  const exportDetailPdf = () => exportIssueDetailPdf(issue, attachments);
+
+  return (
+    <div className="fixed inset-0 z-50 bg-slate-950/40 p-4" role="dialog" aria-modal="true">
+      <div className="ml-auto flex h-full max-w-4xl flex-col overflow-hidden rounded-lg bg-white shadow-panel">
+        <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <BusinessUnitBadge name={issue.businessUnitName} colour={issue.businessUnitColour} />
+              <StatusBadge status={issue.status} />
+              <IssueCategoryBadge category={issue.category} />
+              {issue.isChangeRequest && <span className="badge border-purple-200 bg-purple-50 text-purple-700">Change Request</span>}
+            </div>
+            <h2 className="mt-3 text-xl font-bold text-slate-950">{issue.issueId}: {issue.subject || 'No subject recorded'}</h2>
+            <p className="mt-1 text-sm text-slate-600">Source: {issue.originalWorksheet}, row {issue.originalRowNumber}</p>
+          </div>
+          <button className="btn-secondary" onClick={close}>Close</button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-y-auto p-5">
+          <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
+            <div className="space-y-5">
+              <div className="rounded-md border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-950">Issue detail</h3>
+                <p className="mt-3 whitespace-pre-line text-sm leading-6 text-slate-700">{issue.detail || 'No detail recorded.'}</p>
+              </div>
+              <IssueFieldGrid issue={issue} />
+              <div className="rounded-md border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-950">Comments timeline</h3>
+                <div className="mt-4 grid gap-3">
+                  <input className="input" value={commentAuthor} onChange={(event) => setCommentAuthor(event.target.value)} placeholder="Author" />
+                  <textarea className="input min-h-[96px]" value={commentText} onChange={(event) => setCommentText(event.target.value)} placeholder="Add a comment..." />
+                  <button className="btn-primary justify-self-start" onClick={addComment}><MessageSquare size={16} /> Add comment</button>
+                </div>
+                <div className="mt-5 space-y-3">
+                  {issue.comments.map((comment) => (
+                    <div key={comment.id} className="rounded-md border border-slate-200 bg-slate-50 p-3 text-sm">
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="font-bold text-slate-950">{comment.author}</span>
+                        <span className="text-slate-500">{formatIssueDateTime(comment.createdAt)}</span>
+                      </div>
+                      <p className="mt-2 whitespace-pre-line text-slate-700">{comment.text}</p>
+                      <p className="mt-2 text-xs font-semibold text-slate-500">Status at comment: {comment.statusAtTime}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <aside className="space-y-4">
+              <div className="rounded-md border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-950">Triage</h3>
+                <div className="mt-3 space-y-3">
+                  <FilterSelect label="Category" value={issue.category} setValue={setCategory} options={categories.map((item) => item.name)} />
+                  <FilterSelect label="Status" value={issue.status} setValue={setStatus} options={statuses.map((item) => item.name)} />
+                  <Toggle label="Change request" checked={issue.isChangeRequest} onChange={setChangeRequest} />
+                </div>
+              </div>
+              <div className="rounded-md border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-950">Room link</h3>
+                <p className="mt-2 text-sm text-slate-700">{issue.roomCode || 'No room code recorded'}</p>
+                {issue.roomCode && (
+                  <button className="btn-secondary mt-3" onClick={() => (roomExists ? openRoomProfile(issue.roomCode) : undefined)} disabled={!roomExists}>
+                    <ExternalLink size={16} /> Open room details
+                  </button>
+                )}
+              </div>
+              <div className="rounded-md border border-slate-200 p-4">
+                <h3 className="font-bold text-slate-950">Photo/reference</h3>
+                <div className="mt-3 space-y-2 text-sm">
+                  {attachments.length ? attachments.map((attachment) => (
+                    <div key={attachment.id} className="rounded-md bg-slate-50 p-3">
+                      <p className="font-semibold text-slate-800">{attachment.label}</p>
+                      {attachment.url && isIssueImageUrl(attachment.url) && (
+                        <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-2 block overflow-hidden rounded-md border border-slate-200 bg-white">
+                          <img src={attachment.url} alt={attachment.label} className="max-h-48 w-full object-contain" loading="lazy" />
+                        </a>
+                      )}
+                      {attachment.url && (
+                        <a href={attachment.url} target="_blank" rel="noreferrer" className="mt-2 block break-all text-slate-600 hover:text-ecu-teal">
+                          {isIssueImageUrl(attachment.url) ? 'Open saved image' : attachment.url}
+                        </a>
+                      )}
+                      {attachment.sourceUrl && (
+                        <a href={attachment.sourceUrl} target="_blank" rel="noreferrer" className="mt-1 block break-all text-xs text-slate-500 hover:text-ecu-teal">
+                          Source link
+                        </a>
+                      )}
+                    </div>
+                  )) : <p className="text-slate-600">{issue.photoReference || 'No reference recorded.'}</p>}
+                </div>
+              </div>
+              <button className="btn-primary w-full" onClick={exportDetailPdf}><FileText size={16} /> Export detail PDF</button>
+            </aside>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+const issueQuickFilters = ['All', 'Priority', 'Status', 'Change Requests', 'AV/IT defects', 'Operations defects', 'FFE defects', 'Building defects', 'Items ready for user inspection'];
+
+const issueColumns: { key: IssueSortKey; label: string }[] = [
+  { key: 'businessUnitName', label: 'Business unit' },
+  { key: 'issueId', label: 'Issue ID' },
+  { key: 'dateIdentified', label: 'Date identified' },
+  { key: 'contactPerson', label: 'Contact' },
+  { key: 'roomCode', label: 'Room number' },
+  { key: 'roomName', label: 'Room name' },
+  { key: 'subject', label: 'Subject' },
+  { key: 'priority', label: 'Priority' },
+  { key: 'category', label: 'Category' },
+  { key: 'responsiblePerson', label: 'Responsible' },
+  { key: 'status', label: 'Status' },
+  { key: 'isChangeRequest', label: 'CR' },
+];
+
+function matchesIssueQuickFilter(issue: Issue, filter: string) {
+  if (filter === 'All') return true;
+  if (filter === 'Priority') return Boolean(issue.priority);
+  if (filter === 'Status') return Boolean(issue.status);
+  if (filter === 'Change Requests') return issue.isChangeRequest;
+  if (filter === 'AV/IT defects') return !issue.isChangeRequest && issue.category === 'AV/IT';
+  if (filter === 'Operations defects') return !issue.isChangeRequest && issue.category === 'Operations';
+  if (filter === 'FFE defects') return !issue.isChangeRequest && issue.category === 'FFE';
+  if (filter === 'Building defects') return !issue.isChangeRequest && issue.category === 'Building Defect';
+  if (filter === 'Items ready for user inspection') return issue.status === 'Ready for User Inspection';
+  return true;
+}
+
+function isIssueImageUrl(value: string) {
+  return /\.(png|jpe?g|gif|webp|bmp|svg)(?:$|[?#])/i.test(value);
+}
+
+function compareIssueField(a: Issue, b: Issue, key: IssueSortKey, direction: 'asc' | 'desc') {
+  const modifier = direction === 'asc' ? 1 : -1;
+  const aValue = key === 'isChangeRequest' ? Number(a[key]) : String(a[key] ?? '').toLowerCase();
+  const bValue = key === 'isChangeRequest' ? Number(b[key]) : String(b[key] ?? '').toLowerCase();
+  return aValue > bValue ? modifier : aValue < bValue ? -modifier : 0;
+}
+
+function countBy<T>(items: T[], getKey: (item: T) => string) {
+  const counts = new Map<string, number>();
+  items.forEach((item) => {
+    const key = getKey(item);
+    counts.set(key, (counts.get(key) ?? 0) + 1);
+  });
+  return Array.from(counts, ([label, count]) => ({ label, count })).sort((a, b) => b.count - a.count);
+}
+
+function issueAgeDays(issue: Issue) {
+  const value = issue.dateIdentified;
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return 0;
+  return Math.max(0, Math.floor((Date.now() - date.getTime()) / (24 * 60 * 60 * 1000)));
+}
+
+function formatIssueDate(value: string) {
+  if (!value) return '-';
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleDateString(undefined, { day: '2-digit', month: 'short', year: 'numeric' });
+}
+
+function formatIssueDateTime(value: string) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function BusinessUnitBadge({ name, colour }: { name: string; colour: string }) {
+  return (
+    <span className="badge border-slate-200 bg-white text-slate-800" style={{ borderColor: colour, boxShadow: `inset 4px 0 0 ${colour}` }}>
+      {name}
+    </span>
+  );
+}
+
+function PriorityBadge({ priority }: { priority: string }) {
+  const text = priority || 'Unprioritised';
+  const tone = text.startsWith('1') ? 'border-red-200 bg-red-50 text-red-700'
+    : text.startsWith('2') ? 'border-orange-200 bg-orange-50 text-orange-700'
+      : text.startsWith('3') ? 'border-amber-200 bg-amber-50 text-amber-700'
+        : text.startsWith('4') ? 'border-slate-200 bg-slate-50 text-slate-700'
+          : 'border-slate-200 bg-white text-slate-600';
+  return <span className={cn('badge', tone)}>{text}</span>;
+}
+
+function IssueCategoryBadge({ category }: { category: string }) {
+  const tone = category === 'Change Request' ? 'border-purple-200 bg-purple-50 text-purple-700'
+    : category === 'AV/IT' ? 'border-blue-200 bg-blue-50 text-blue-700'
+      : category === 'Operations' ? 'border-teal-200 bg-teal-50 text-teal-700'
+        : category === 'FFE' ? 'border-pink-200 bg-pink-50 text-pink-700'
+          : category === 'Building Defect' ? 'border-orange-200 bg-orange-50 text-orange-700'
+            : 'border-slate-200 bg-slate-50 text-slate-700';
+  return <span className={cn('badge', tone)}>{category || 'Other'}</span>;
+}
+
+type IssueChartRow = { label: string; count: number; colour?: string; filter?: IssueListFilter };
+
+const issueStatusChartOrder = ['Closed', 'In-Progress', 'Open', 'Ready for User Inspection'];
+const issueCategoryChartOrder = ['Building Defect', 'AV/IT', 'Change Request', 'FFE', 'Operations', 'Other'];
+const issuePriorityChartOrder = [
+  '3 - Standard - Moderate Impact',
+  '2 - Urgent - Significant Impact',
+  '4 - Minor - Low Impact / Cosmetic',
+  'Unspecified',
+  '1 - Immediate (Critical Emergency)',
+];
+
+const issueStatusChartColours: Record<string, string> = {
+  Closed: '#e5252a',
+  'In-Progress': '#df7c00',
+  Open: '#2f63e6',
+  'Ready for User Inspection': '#177a3f',
+};
+
+const issueCategoryChartColours: Record<string, string> = {
+  'Building Defect': '#2f63e6',
+  'AV/IT': '#168277',
+  'Change Request': '#ad6c06',
+  FFE: '#c81e22',
+  Operations: '#7c3aed',
+  Other: '#6b7b92',
+};
+
+const issuePriorityChartColours: Record<string, string> = {
+  '3 - Standard - Moderate Impact': '#a7191d',
+  '2 - Urgent - Significant Impact': '#ff7018',
+  '4 - Minor - Low Impact / Cosmetic': '#f2b705',
+  Unspecified: '#26c45d',
+  '1 - Immediate (Critical Emergency)': '#97a7ba',
+};
+
+const issueBusinessUnitChartColours: Record<string, string> = {
+  SAH: '#de2f34',
+  WAAPA: '#5f7fa8',
+  SBL: '#9bd957',
+  GEM: '#6b7b92',
+  'CLT-Teaching': '#6b7b92',
+  'Access + Equity': '#6b7b92',
+  'Student Admin': '#47cdd3',
+  Student_Hub: '#ffc000',
+  Guild: '#6b7b92',
+  Library: '#00b050',
+  'Digital Services': '#6b7b92',
+  CSO: '#6b7b92',
+  'Creative Futures': '#6b7b92',
+  'Wellbeing Precinct': '#ffff00',
+  General: '#6b7b92',
+  'Kurongkurl Katitjin': '#6b7b92',
+  Science: '#6b7b92',
+};
+
+function getIssueStatusChartColour(label: string) {
+  return issueStatusChartColours[label] ?? '#6b7b92';
+}
+
+function getIssueCategoryChartColour(label: string) {
+  return issueCategoryChartColours[label] ?? '#6b7b92';
+}
+
+function getIssuePriorityChartColour(label: string) {
+  return issuePriorityChartColours[label] ?? '#6b7b92';
+}
+
+function getBusinessUnitChartColour(label: string, fallback: string) {
+  return issueBusinessUnitChartColours[label] ?? fallback;
+}
+
+function orderIssueChartRows(rows: IssueChartRow[], order: string[]) {
+  const orderIndex = new Map(order.map((label, index) => [label, index]));
+  return [...rows].sort((a, b) => {
+    const aIndex = orderIndex.get(a.label);
+    const bIndex = orderIndex.get(b.label);
+    if (aIndex !== undefined && bIndex !== undefined) return aIndex - bIndex;
+    if (aIndex !== undefined) return -1;
+    if (bIndex !== undefined) return 1;
+    return b.count - a.count || a.label.localeCompare(b.label);
+  });
+}
+
+function niceChartMaximum(value: number) {
+  if (value <= 0) return 1;
+  const targetTickCount = 5;
+  const rawStep = value / targetTickCount;
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep));
+  const normalized = rawStep / magnitude;
+  const niceStep = normalized <= 1 ? 1 : normalized <= 2 ? 2 : normalized <= 7 ? 5 : 10;
+  return Math.ceil(value / (niceStep * magnitude)) * niceStep * magnitude;
+}
+
+function IssueBarChart({ title, rows, onSelect }: { title: string; rows: IssueChartRow[]; onSelect?: (row: IssueChartRow) => void }) {
+  const visibleRows = rows.filter((row) => row.count > 0);
+  const max = niceChartMaximum(Math.max(...visibleRows.map((row) => row.count), 1));
+  const chartWidth = 760;
+  const chartHeight = 360;
+  const margin = { top: 20, right: 16, bottom: 76, left: 48 };
+  const plotWidth = chartWidth - margin.left - margin.right;
+  const plotHeight = chartHeight - margin.top - margin.bottom;
+  const gap = visibleRows.length > 8 ? 10 : 26;
+  const barWidth = visibleRows.length ? Math.max(14, Math.min(84, (plotWidth - gap * (visibleRows.length - 1)) / visibleRows.length)) : 0;
+  const ticks = Array.from({ length: 6 }, (_, index) => Math.round((max / 5) * index));
+
+  return (
+    <div className="panel rounded-lg p-4">
+      <ChartTitle title={title} />
+      <div className="mt-4 h-[360px]">
+        <svg className="h-full w-full overflow-visible" viewBox={`0 0 ${chartWidth} ${chartHeight}`} role="img" aria-label={title} preserveAspectRatio="none">
+          {ticks.map((tick) => {
+            const y = margin.top + plotHeight - (tick / max) * plotHeight;
+            return (
+              <g key={tick}>
+                <line x1={margin.left} x2={chartWidth - margin.right} y1={y} y2={y} stroke="#d6dbe1" strokeWidth="1" />
+                <text x={margin.left - 10} y={y + 4} textAnchor="end" fill="#555f6d" fontSize="12">{tick.toLocaleString()}</text>
+              </g>
+            );
+          })}
+          <line x1={margin.left} x2={margin.left} y1={margin.top} y2={margin.top + plotHeight} stroke="#c8ced6" />
+          <line x1={margin.left} x2={chartWidth - margin.right} y1={margin.top + plotHeight} y2={margin.top + plotHeight} stroke="#c8ced6" />
+          {visibleRows.map((row, index) => {
+            const x = margin.left + index * (barWidth + gap) + ((plotWidth - (barWidth * visibleRows.length + gap * (visibleRows.length - 1))) / 2);
+            const height = (row.count / max) * plotHeight;
+            const y = margin.top + plotHeight - height;
+            const selectRow = () => onSelect?.(row);
+            return (
+              <g
+                key={row.label}
+                role={onSelect ? 'button' : undefined}
+                tabIndex={onSelect ? 0 : undefined}
+                className={onSelect ? 'cursor-pointer outline-none' : undefined}
+                aria-label={onSelect ? `Show ${row.count.toLocaleString()} issue${row.count === 1 ? '' : 's'} for ${row.label}` : undefined}
+                onClick={selectRow}
+                onKeyDown={(event) => {
+                  if (!onSelect) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectRow();
+                  }
+                }}
+              >
+                <rect x={x} y={y} width={barWidth} height={height} rx="5" fill={row.colour ?? '#6b7b92'} opacity="0.96" />
+                {onSelect && <rect x={x - 5} y={margin.top} width={barWidth + 10} height={plotHeight} fill="transparent" />}
+                <text x={x + barWidth / 2} y={margin.top + plotHeight + 28} textAnchor="end" transform={`rotate(-35 ${x + barWidth / 2} ${margin.top + plotHeight + 28})`} fill="#555f6d" fontSize="12">
+                  {row.label}
+                </text>
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function IssueDonutChart({ title, rows, onSelect }: { title: string; rows: IssueChartRow[]; onSelect?: (row: IssueChartRow) => void }) {
+  const visibleRows = rows.filter((row) => row.count > 0);
+  const total = visibleRows.reduce((sum, row) => sum + row.count, 0);
+  const radius = 86;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+
+  return (
+    <div className="panel rounded-lg p-4">
+      <ChartTitle title={title} />
+      <div className="mt-4 flex min-h-[360px] flex-col items-center justify-center">
+        <div className="mb-3 flex max-w-full flex-wrap items-center justify-center gap-x-4 gap-y-2 text-xs text-slate-600">
+          {rows.map((row) => (
+            <button
+              key={row.label}
+              type="button"
+              className={cn('inline-flex items-center gap-2 whitespace-nowrap rounded-sm outline-none', onSelect && 'cursor-pointer hover:text-slate-950 focus:ring-2 focus:ring-ecu-teal/40')}
+              onClick={() => onSelect?.(row)}
+              disabled={!onSelect || row.count === 0}
+              aria-label={`Show ${row.count.toLocaleString()} issue${row.count === 1 ? '' : 's'} for ${row.label}`}
+            >
+              <span className="h-2.5 w-10" style={{ backgroundColor: row.colour ?? '#6b7b92' }} />
+              {row.label}
+            </button>
+          ))}
+        </div>
+        <svg className="h-[300px] w-full max-w-[520px]" viewBox="0 0 240 240" role="img" aria-label={title}>
+          <circle cx="120" cy="120" r={radius} fill="none" stroke="#f1f5f9" strokeWidth="52" />
+          {visibleRows.map((row) => {
+            const dash = total > 0 ? (row.count / total) * circumference : 0;
+            const selectRow = () => onSelect?.(row);
+            const segment = (
+              <circle
+                key={row.label}
+                cx="120"
+                cy="120"
+                r={radius}
+                fill="none"
+                stroke={row.colour ?? '#6b7b92'}
+                strokeDasharray={`${Math.max(0, dash - 2)} ${circumference}`}
+                strokeDashoffset={-offset}
+                strokeLinecap="butt"
+                strokeWidth="52"
+                transform="rotate(-90 120 120)"
+                className={onSelect ? 'cursor-pointer outline-none' : undefined}
+                role={onSelect ? 'button' : undefined}
+                tabIndex={onSelect ? 0 : undefined}
+                aria-label={onSelect ? `Show ${row.count.toLocaleString()} issue${row.count === 1 ? '' : 's'} for ${row.label}` : undefined}
+                onClick={selectRow}
+                onKeyDown={(event) => {
+                  if (!onSelect) return;
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    selectRow();
+                  }
+                }}
+              />
+            );
+            offset += dash;
+            return segment;
+          })}
+          <circle cx="120" cy="120" r="58" fill="white" />
+        </svg>
+      </div>
+    </div>
+  );
+}
+
+function ChartTitle({ title }: { title: string }) {
+  return (
+    <div>
+      <h3 className="font-bold text-slate-950">{title}</h3>
+      <div className="mt-2 h-0.5 w-10 bg-ecu-teal" />
+    </div>
+  );
+}
+
+function ReportCard({ title, detail, action }: { title: string; detail: string; action: ReactNode }) {
+  return (
+    <div className="panel rounded-lg p-5">
+      <h3 className="font-bold text-slate-950">{title}</h3>
+      <p className="mt-2 text-sm text-slate-600">{detail}</p>
+      <div className="mt-5">{action}</div>
+    </div>
+  );
+}
+
+function IssueFieldGrid({ issue }: { issue: Issue }) {
+  const rows = [
+    ['Contact person', issue.contactPerson],
+    ['Room number', issue.roomCode],
+    ['Room name', issue.roomName],
+    ['Priority', issue.priority],
+    ['Responsible person', issue.responsiblePerson],
+    ['Source category', issue.sourceCategory],
+    ['Date identified', formatIssueDate(issue.dateIdentified)],
+    ['Date closed', formatIssueDate(issue.dateClosed)],
+    ['Aconex ref', issue.aconexRef],
+    ['Aconex defect #', issue.aconexFieldDefect],
+  ];
+  return (
+    <div className="grid gap-3 md:grid-cols-2">
+      {rows.map(([label, value]) => (
+        <div key={label} className="rounded-md border border-slate-200 p-3">
+          <p className="label">{label}</p>
+          <p className="mt-1 break-words text-sm font-semibold text-slate-800">{value || '-'}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function exportIssuesCsv(issues: Issue[]) {
+  downloadCsv('issues-register-export.csv', issues.map((issue) => ({
+    businessUnit: issue.businessUnitName,
+    issueId: issue.issueId,
+    dateIdentified: issue.dateIdentified,
+    contactPerson: issue.contactPerson,
+    roomCode: issue.roomCode,
+    roomName: issue.roomName,
+    subject: issue.subject,
+    detail: issue.detail,
+    priority: issue.priority,
+    category: issue.category,
+    isChangeRequest: issue.isChangeRequest ? 'Yes' : 'No',
+    responsiblePerson: issue.responsiblePerson,
+    status: issue.status,
+    sourceWorksheet: issue.originalWorksheet,
+    sourceRow: issue.originalRowNumber,
+  })));
+}
+
+function exportIssueDetailPdf(issue: Issue, attachments: IssueAttachmentReference[]) {
+  const doc = new jsPDF();
+  doc.setFontSize(16);
+  doc.text(`Issue ${issue.issueId}`, 14, 18);
+  doc.setFontSize(10);
+  const lines = [
+    `Business unit: ${issue.businessUnitName}`,
+    `Room: ${issue.roomCode || '-'} ${issue.roomName || ''}`,
+    `Status: ${issue.status}`,
+    `Category: ${issue.category}`,
+    `Change request: ${issue.isChangeRequest ? 'Yes' : 'No'}`,
+    `Responsible: ${issue.responsiblePerson || '-'}`,
+    `Priority: ${issue.priority || '-'}`,
+    `Date identified: ${issue.dateIdentified || '-'}`,
+    `Subject: ${issue.subject || '-'}`,
+    '',
+    'Detail:',
+    issue.detail || '-',
+    '',
+    'References:',
+    ...(attachments.length ? attachments.map((item) => `${item.label}${item.url ? ` - ${item.url}` : ''}`) : [issue.photoReference || '-']),
+  ];
+  let y = 32;
+  lines.forEach((line) => {
+    const wrapped = doc.splitTextToSize(line, 180);
+    doc.text(wrapped, 14, y);
+    y += wrapped.length * 6;
+    if (y > 280) {
+      doc.addPage();
+      y = 18;
+    }
+  });
+  doc.save(`issue-${issue.issueId.replace(/[^a-z0-9]+/gi, '-')}.pdf`);
+}
+
 function DataLoadProgressBanner({ progress }: { progress: RoomDataLoadProgress }) {
   return (
     <div className="border-b border-ecu-teal/30 bg-ecu-mint px-4 py-3 text-sm text-slate-800 lg:px-8" role="status" aria-live="polite">
@@ -1458,6 +2752,782 @@ function DataLoadProgressBanner({ progress }: { progress: RoomDataLoadProgress }
   );
 }
 
+const uploadedFloorplansStorageKey = 'ecu-room-data-uploaded-floorplans';
+const uploadedFloorplansDbName = 'ecu-room-data-floorplans';
+const uploadedFloorplansStoreName = 'uploaded-floorplans';
+
+function loadUploadedFloorplansFromLocalStorage() {
+  try {
+    const value = window.localStorage.getItem(uploadedFloorplansStorageKey);
+    if (!value) return [];
+    const parsed = JSON.parse(value) as FloorplanDefinition[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function clearLegacyUploadedFloorplansStorage() {
+  try {
+    window.localStorage.removeItem(uploadedFloorplansStorageKey);
+  } catch {
+    // Legacy cleanup is best-effort only.
+  }
+}
+
+function openUploadedFloorplansDb() {
+  return new Promise<IDBDatabase>((resolve, reject) => {
+    if (!window.indexedDB) {
+      reject(new Error('This browser does not support persistent floorplan storage.'));
+      return;
+    }
+
+    const request = window.indexedDB.open(uploadedFloorplansDbName, 1);
+    request.onerror = () => reject(request.error ?? new Error('Could not open floorplan storage.'));
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = () => {
+      const db = request.result;
+      if (!db.objectStoreNames.contains(uploadedFloorplansStoreName)) {
+        db.createObjectStore(uploadedFloorplansStoreName, { keyPath: 'id' });
+      }
+    };
+  });
+}
+
+async function loadLocalUploadedFloorplans() {
+  try {
+    const db = await openUploadedFloorplansDb();
+    return await new Promise<FloorplanDefinition[]>((resolve, reject) => {
+      const transaction = db.transaction(uploadedFloorplansStoreName, 'readonly');
+      const request = transaction.objectStore(uploadedFloorplansStoreName).getAll();
+      request.onerror = () => reject(request.error ?? new Error('Could not load uploaded floorplans.'));
+      request.onsuccess = () => resolve(request.result as FloorplanDefinition[]);
+      transaction.oncomplete = () => db.close();
+    });
+  } catch {
+    return loadUploadedFloorplansFromLocalStorage();
+  }
+}
+
+async function saveLocalUploadedFloorplans(items: FloorplanDefinition[]) {
+  try {
+    const db = await openUploadedFloorplansDb();
+    await new Promise<void>((resolve, reject) => {
+      const transaction = db.transaction(uploadedFloorplansStoreName, 'readwrite');
+      const store = transaction.objectStore(uploadedFloorplansStoreName);
+      store.clear();
+      items.forEach((item) => store.put(item));
+      transaction.onerror = () => reject(transaction.error ?? new Error('Could not save uploaded floorplans.'));
+      transaction.oncomplete = () => {
+        db.close();
+        resolve();
+      };
+    });
+    clearLegacyUploadedFloorplansStorage();
+  } catch {
+    // Uploaded floorplans still work for the current session if persistent browser storage is unavailable.
+  }
+}
+
+function isPdfTextItem(item: unknown): item is TextItem {
+  return Boolean(item && typeof item === 'object' && 'str' in item && 'transform' in item);
+}
+
+function normalizeUploadedRoomFragment(fragment: string) {
+  return fragment.replace(/\s+/g, '').toUpperCase();
+}
+
+function normalizeFloorplanFloorLabel(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return 'Uploaded floor';
+  const compact = trimmed.toLowerCase().replace(/\s+/g, '');
+  if (compact === 'g' || compact === 'ground' || compact === 'lg') return 'Ground';
+  const levelMatch = compact.match(/^(?:l|level)?(\d+)$/);
+  if (levelMatch) return `Level ${Number(levelMatch[1])}`;
+  return trimmed.replace(/\blevel\s*(\d+)\b/i, (_match, level) => `Level ${Number(level)}`);
+}
+
+function detectRoomName(text: string, roomFragment: string, previousLabel: string) {
+  const beforeCode = text.slice(0, text.toUpperCase().indexOf(roomFragment.toUpperCase())).trim();
+  return beforeCode || previousLabel || undefined;
+}
+
+function readFileAsDataUrl(file: File) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () => reject(new Error('Could not read the PDF file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
+async function dataUrlToArrayBuffer(dataUrl: string) {
+  const response = await fetch(dataUrl);
+  return response.arrayBuffer();
+}
+
+async function convertPdfDataToFloorplan({
+  pdfData,
+  id,
+  campusCode,
+  buildingCode,
+  buildingName,
+  floor,
+  zone,
+  roomCodePrefix,
+  originalFileName,
+  sourcePdfDataUrl,
+}: {
+  pdfData: ArrayBuffer;
+  id?: string;
+  campusCode: string;
+  buildingCode: string;
+  buildingName: string;
+  floor: string;
+  zone: FloorplanZone;
+  roomCodePrefix: string;
+  originalFileName: string;
+  sourcePdfDataUrl?: string;
+}): Promise<FloorplanDefinition> {
+  const pdf = await getDocument({ data: pdfData.slice(0) }).promise;
+  const page = await pdf.getPage(1);
+  const textViewport = page.getViewport({ scale: 1 });
+  const renderScale = Math.min(2, 2400 / textViewport.width, 1800 / textViewport.height);
+  const viewport = page.getViewport({ scale: renderScale });
+  const canvas = document.createElement('canvas');
+  const context = canvas.getContext('2d');
+  if (!context) throw new Error('Could not prepare a canvas for the PDF floorplan.');
+  canvas.width = Math.ceil(viewport.width);
+  canvas.height = Math.ceil(viewport.height);
+  await page.render({ canvasContext: context, viewport }).promise;
+
+  const textContent = await page.getTextContent();
+  const roomPattern = /\b\d+[A-Z]\.[A-Z0-9]+[A-Z]?\b/g;
+  const hotspots: FloorplanHotspot[] = [];
+  let previousLabel = '';
+
+  textContent.items.filter(isPdfTextItem).forEach((item) => {
+    const rawText = item.str.trim();
+    if (!rawText) return;
+    const matches = [...rawText.matchAll(roomPattern)];
+    if (!matches.length) {
+      if (!/^\[.*\]$/.test(rawText)) previousLabel = rawText;
+      return;
+    }
+
+    matches.forEach((match) => {
+      const fragment = normalizeUploadedRoomFragment(match[0]);
+      const textMatrix = Util.transform(textViewport.transform, item.transform);
+      const [a, b, c, d, x, baselineY] = textMatrix;
+      const fontHeight = Math.max(Math.hypot(c, d), Math.hypot(a, b), 8);
+      const estimatedWidth = Math.max(item.width || 0, fragment.length * Math.max(Math.abs(fontHeight), 8) * 0.55);
+      const estimatedHeight = Math.max(Math.abs(fontHeight) * 1.45, 14);
+      const rectX = Math.max(0, (x / textViewport.width) * 100 - 0.8);
+      const rectY = Math.max(0, ((baselineY - estimatedHeight) / textViewport.height) * 100 - 0.8);
+      const rectWidth = Math.min(100 - rectX, (estimatedWidth / textViewport.width) * 100 + 1.6);
+      const rectHeight = Math.min(100 - rectY, (estimatedHeight / textViewport.height) * 100 + 1.6);
+      hotspots.push({
+        roomCode: `${roomCodePrefix}.${fragment}`,
+        roomName: detectRoomName(rawText, fragment, previousLabel),
+        shape: 'rect',
+        points: [rectX, rectY, Math.max(rectWidth, 3), Math.max(rectHeight, 2.5)],
+      });
+    });
+    previousLabel = '';
+  });
+
+  await pdf.destroy();
+  return {
+    id: id ?? `uploaded-${Date.now()}`,
+    campusCode,
+    buildingCode,
+    buildingName,
+    floor: normalizeFloorplanFloorLabel(floor),
+    zone,
+    imagePath: canvas.toDataURL('image/png'),
+    imageAlt: `${buildingName || buildingCode} ${floor} ${zone} uploaded floorplan`,
+    source: 'uploaded-pdf',
+    uploadedAt: new Date().toISOString(),
+    originalFileName,
+    sourcePdfDataUrl,
+    hotspots,
+  };
+}
+
+async function convertPdfToFloorplan({
+  file,
+  campusCode,
+  buildingCode,
+  buildingName,
+  floor,
+  zone,
+  roomCodePrefix,
+}: {
+  file: File;
+  campusCode: string;
+  buildingCode: string;
+  buildingName: string;
+  floor: string;
+  zone: FloorplanZone;
+  roomCodePrefix: string;
+}): Promise<FloorplanDefinition> {
+  const sourcePdfDataUrl = await readFileAsDataUrl(file);
+  return convertPdfDataToFloorplan({
+    pdfData: await dataUrlToArrayBuffer(sourcePdfDataUrl),
+    campusCode,
+    buildingCode,
+    buildingName,
+    floor,
+    zone,
+    roomCodePrefix,
+    originalFileName: file.name,
+    sourcePdfDataUrl,
+  });
+}
+
+function FloorplansPage({
+  rooms,
+  campuses,
+  buildings,
+  openRoomProfile,
+}: {
+  rooms: Room[];
+  campuses: Campus[];
+  buildings: Building[];
+  openRoomProfile: (roomCode: string) => void;
+}) {
+  const [uploadedFloorplans, setUploadedFloorplans] = useState<FloorplanDefinition[]>([]);
+  const [floorplanStatus, setFloorplanStatus] = useState('');
+  const [reassessingFloorplanId, setReassessingFloorplanId] = useState('');
+  const campusOptions = useMemo(() => {
+    const codes = [
+      ...campuses.map((campus) => campus.code),
+      ...uploadedFloorplans.map((floorplan) => floorplan.campusCode),
+      ...floorplans.map((floorplan) => floorplan.campusCode),
+    ].filter((code): code is string => Boolean(code));
+    return Array.from(new Set(['CC', ...codes])).sort((a, b) => (a === 'CC' ? -1 : b === 'CC' ? 1 : a.localeCompare(b)));
+  }, [campuses, uploadedFloorplans]);
+  const [selectedCampus, setSelectedCampus] = useState('CC');
+  const allFloorplans = useMemo(() => [...uploadedFloorplans, ...floorplans], [uploadedFloorplans]);
+  const campusFloorplans = useMemo(
+    () => allFloorplans.filter((floorplan) => (floorplan.campusCode || 'CC') === selectedCampus),
+    [allFloorplans, selectedCampus],
+  );
+  const sortedFloorplans = useMemo(() => [...campusFloorplans].sort((a, b) => floorSortValue(a.floor) - floorSortValue(b.floor) || a.zone.localeCompare(b.zone)), [campusFloorplans]);
+  const floorOptions = useMemo(() => Array.from(new Set(sortedFloorplans.map((floorplan) => floorplan.floor))), [sortedFloorplans]);
+  const [selectedFloor, setSelectedFloor] = useState(floorOptions[0] ?? 'Level 1');
+  const zoneOptions = useMemo(
+    () => Array.from(new Set(sortedFloorplans.filter((floorplan) => floorplan.floor === selectedFloor).map((floorplan) => floorplan.zone))),
+    [selectedFloor, sortedFloorplans],
+  );
+  const [selectedZone, setSelectedZone] = useState<FloorplanZone>(zoneOptions[0] ?? 'North');
+  const selectedFloorplan = campusFloorplans.find((floorplan) => floorplan.floor === selectedFloor && floorplan.zone === selectedZone);
+  const roomMetadata = useMemo(() => {
+    return rooms.reduce<Map<string, Room>>((metadata, room) => {
+      metadata.set(normalizeRoomCodeKey(room.roomCode), room);
+      return metadata;
+    }, new Map());
+  }, [rooms]);
+
+  useEffect(() => {
+    let isMounted = true;
+    Promise.resolve()
+      .then(async () => {
+        if (isSupabaseConfigured) return loadSharedFloorplansFromSupabase();
+        return loadLocalUploadedFloorplans();
+      })
+      .then((items) => {
+        if (isMounted) setUploadedFloorplans(items);
+      })
+      .catch((error) => {
+        if (isMounted) {
+          setFloorplanStatus(error instanceof Error ? error.message : 'Could not load shared floorplans.');
+        }
+      });
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!campusOptions.includes(selectedCampus)) setSelectedCampus('CC');
+  }, [campusOptions, selectedCampus]);
+
+  useEffect(() => {
+    if (!floorOptions.includes(selectedFloor) && floorOptions[0]) setSelectedFloor(floorOptions[0]);
+  }, [floorOptions, selectedFloor]);
+
+  useEffect(() => {
+    if (!zoneOptions.includes(selectedZone) && zoneOptions[0]) setSelectedZone(zoneOptions[0]);
+  }, [selectedZone, zoneOptions]);
+
+  const mergeUploadedFloorplan = (floorplan: FloorplanDefinition) => {
+    setUploadedFloorplans((current) => {
+      const next = [
+        floorplan,
+        ...current.filter((item) => !(
+          item.id === floorplan.id
+          || (
+            item.campusCode === floorplan.campusCode
+            && item.buildingCode === floorplan.buildingCode
+            && item.floor === floorplan.floor
+            && item.zone === floorplan.zone
+          )
+        )),
+      ];
+      if (!isSupabaseConfigured) void saveLocalUploadedFloorplans(next);
+      return next;
+    });
+    setSelectedFloor(floorplan.floor);
+    setSelectedZone(floorplan.zone);
+    setSelectedCampus(floorplan.campusCode || 'CC');
+  };
+
+  const addUploadedFloorplan = async (floorplan: FloorplanDefinition) => {
+    setFloorplanStatus(isSupabaseConfigured ? 'Saving shared floorplan to Supabase...' : '');
+    const savedFloorplan = isSupabaseConfigured ? await saveSharedFloorplanToSupabase(floorplan) : floorplan;
+    mergeUploadedFloorplan(savedFloorplan);
+    setFloorplanStatus(isSupabaseConfigured ? 'Shared floorplan saved for all users.' : '');
+    return savedFloorplan;
+  };
+
+  const replaceUploadedFloorplan = async (floorplan: FloorplanDefinition) => {
+    const savedFloorplan = isSupabaseConfigured ? await saveSharedFloorplanToSupabase(floorplan) : floorplan;
+    setUploadedFloorplans((current) => {
+      const next = current.map((item) => (item.id === savedFloorplan.id ? savedFloorplan : item));
+      if (!isSupabaseConfigured) void saveLocalUploadedFloorplans(next);
+      return next;
+    });
+    return savedFloorplan;
+  };
+
+  const reassessUploadedFloorplan = async (floorplan: FloorplanDefinition) => {
+    if (!floorplan.sourcePdfDataUrl) {
+      setFloorplanStatus('This uploaded floorplan cannot be re-assessed because the original PDF is not available in browser storage. Upload the PDF again to create fresh hotspots.');
+      return;
+    }
+
+    setReassessingFloorplanId(floorplan.id);
+    setFloorplanStatus('Re-assessing PDF text positions and clickable hotspots...');
+    try {
+      const reassessed = await convertPdfDataToFloorplan({
+        pdfData: await dataUrlToArrayBuffer(floorplan.sourcePdfDataUrl),
+        id: floorplan.id,
+        campusCode: floorplan.campusCode || floorplan.hotspots[0]?.roomCode.split('.')[0] || 'CC',
+        buildingCode: floorplan.buildingCode || '',
+        buildingName: floorplan.buildingName || floorplan.buildingCode || 'Building',
+        floor: floorplan.floor,
+        zone: floorplan.zone,
+        roomCodePrefix: floorplan.hotspots[0]?.roomCode.split('.')[0] || floorplan.campusCode || 'CC',
+        originalFileName: floorplan.originalFileName || 'Uploaded floorplan.pdf',
+        sourcePdfDataUrl: floorplan.sourcePdfDataUrl,
+      });
+      const saved = await replaceUploadedFloorplan(reassessed);
+      setFloorplanStatus(`Re-assessed ${saved.hotspots.length} clickable room hotspot${saved.hotspots.length === 1 ? '' : 's'}${isSupabaseConfigured ? ' and saved it for all users' : ''}.`);
+    } catch (error) {
+      setFloorplanStatus(error instanceof Error ? error.message : 'Could not re-assess this uploaded PDF floorplan.');
+    } finally {
+      setReassessingFloorplanId('');
+    }
+  };
+
+  return (
+    <>
+      <PageHeader
+        title="Floorplans"
+        description="Choose an ECU City Campus floor and wing, then select a mapped room to open Room Search for that room."
+      />
+      <div className="grid gap-5 xl:grid-cols-[360px_1fr]">
+        <div className="grid gap-5">
+          <FloorSelector
+            campusOptions={campusOptions}
+            selectedCampus={selectedCampus}
+            setSelectedCampus={setSelectedCampus}
+            floorOptions={floorOptions}
+            zoneOptions={zoneOptions}
+            selectedFloor={selectedFloor}
+            selectedZone={selectedZone}
+            selectedFloorplan={selectedFloorplan}
+            setSelectedFloor={setSelectedFloor}
+            setSelectedZone={setSelectedZone}
+          />
+          <FloorplanPdfUpload campuses={campuses} buildings={buildings} onUploaded={addUploadedFloorplan} />
+        </div>
+        {selectedFloorplan ? (
+          <FloorplanViewer
+            floorplan={selectedFloorplan}
+            roomMetadata={roomMetadata}
+            openRoomProfile={openRoomProfile}
+            onReassess={selectedFloorplan.source === 'uploaded-pdf' ? reassessUploadedFloorplan : undefined}
+            isReassessing={reassessingFloorplanId === selectedFloorplan.id}
+            reassessStatus={floorplanStatus}
+          />
+        ) : (
+          <div className="panel flex min-h-[420px] items-center justify-center rounded-lg p-8 text-center">
+            <div>
+              <MapIcon className="mx-auto text-slate-300" size={44} />
+              <h2 className="mt-4 text-xl font-bold text-slate-950">No floorplan yet</h2>
+              <p className="mt-2 max-w-md text-sm text-slate-600">
+                There is no configured floorplan for {selectedFloor} {selectedZone}. Add an image under public/floorplans/ and map it in src/data/floorplans.ts.
+              </p>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function FloorSelector({
+  campusOptions,
+  selectedCampus,
+  setSelectedCampus,
+  floorOptions,
+  zoneOptions,
+  selectedFloor,
+  selectedZone,
+  selectedFloorplan,
+  setSelectedFloor,
+  setSelectedZone,
+}: {
+  campusOptions: string[];
+  selectedCampus: string;
+  setSelectedCampus: (campus: string) => void;
+  floorOptions: string[];
+  zoneOptions: FloorplanZone[];
+  selectedFloor: string;
+  selectedZone: FloorplanZone;
+  selectedFloorplan?: FloorplanDefinition;
+  setSelectedFloor: (floor: string) => void;
+  setSelectedZone: (zone: FloorplanZone) => void;
+}) {
+  return (
+    <div className="panel rounded-lg p-4">
+      <SectionTitle icon={MapIcon} title="Select Floorplan" />
+      <div className="mt-4 grid gap-4">
+        <FilterSelect label="Campus" value={selectedCampus} setValue={setSelectedCampus} options={campusOptions} />
+        <FilterSelect label="Floor level" value={selectedFloor} setValue={setSelectedFloor} options={floorOptions} />
+        <div>
+          <label className="label">Building zone</label>
+          <div className="mt-2 grid grid-cols-3 gap-2">
+            {(['North', 'South', 'Both'] as FloorplanZone[]).map((zone) => {
+              const isAvailable = zoneOptions.includes(zone);
+              return (
+                <button
+                  key={zone}
+                  type="button"
+                  disabled={!isAvailable}
+                  onClick={() => setSelectedZone(zone)}
+                  className={cn(
+                    'rounded-md border px-3 py-2 text-sm font-semibold transition disabled:cursor-not-allowed disabled:opacity-40',
+                    selectedZone === zone && isAvailable
+                      ? 'border-ecu-teal bg-ecu-mint text-ecu-black'
+                      : 'border-slate-200 bg-white text-slate-600 hover:border-ecu-teal',
+                  )}
+                >
+                  {zone}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+        <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+          <p className="label">Current selection</p>
+          <p className="mt-1 font-bold text-slate-950">{selectedFloor} / {selectedZone}</p>
+          <p className="mt-1 text-sm text-slate-600">
+            {selectedFloorplan ? `${selectedFloorplan.hotspots.length} clickable room hotspot${selectedFloorplan.hotspots.length === 1 ? '' : 's'} configured.` : 'No floorplan configured for this combination.'}
+          </p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function FloorplanPdfUpload({
+  campuses,
+  buildings,
+  onUploaded,
+}: {
+  campuses: Campus[];
+  buildings: Building[];
+  onUploaded: (floorplan: FloorplanDefinition) => Promise<FloorplanDefinition>;
+}) {
+  const defaultCampusCode = campuses.some((campus) => campus.code === 'CC') ? 'CC' : campuses[0]?.code || 'CC';
+  const [campusCode, setCampusCode] = useState(defaultCampusCode);
+  const campusBuildings = useMemo(() => buildings.filter((building) => building.campusCode === campusCode), [buildings, campusCode]);
+  const [buildingCode, setBuildingCode] = useState(campusBuildings[0]?.code || '1');
+  const [floor, setFloor] = useState('Level 4');
+  const [zone, setZone] = useState<FloorplanZone>('South');
+  const [roomCodePrefix, setRoomCodePrefix] = useState(defaultCampusCode);
+  const [file, setFile] = useState<File | null>(null);
+  const [status, setStatus] = useState('');
+  const [isProcessing, setIsProcessing] = useState(false);
+
+  useEffect(() => {
+    if (!campuses.some((campus) => campus.code === campusCode) && defaultCampusCode) {
+      setCampusCode(defaultCampusCode);
+      setRoomCodePrefix(defaultCampusCode);
+    }
+  }, [campusCode, campuses, defaultCampusCode]);
+
+  useEffect(() => {
+    if (!campusBuildings.some((building) => building.code === buildingCode)) {
+      setBuildingCode(campusBuildings[0]?.code || '');
+    }
+  }, [buildingCode, campusBuildings]);
+
+  const handleCampusChange = (value: string) => {
+    setCampusCode(value);
+    setRoomCodePrefix(value);
+  };
+
+  const handleFileChange = (event: ChangeEvent<HTMLInputElement>) => {
+    setFile(event.target.files?.[0] ?? null);
+    setStatus('');
+  };
+
+  const uploadPdf = async () => {
+    if (!file) {
+      setStatus('Choose a PDF floorplan first.');
+      return;
+    }
+    if (!roomCodePrefix.trim()) {
+      setStatus('Choose the room code prefix, for example CC.');
+      return;
+    }
+
+    setIsProcessing(true);
+    setStatus('Reading PDF text and rendering the first page...');
+    try {
+      const building = buildings.find((item) => item.code === buildingCode && item.campusCode === campusCode);
+      const converted = await convertPdfToFloorplan({
+        file,
+        campusCode,
+        buildingCode,
+        buildingName: building?.name || buildingCode || 'Building',
+        floor: normalizeFloorplanFloorLabel(floor),
+        zone,
+        roomCodePrefix: roomCodePrefix.trim().toUpperCase(),
+      });
+      const saved = await onUploaded(converted);
+      setStatus(`Created ${saved.hotspots.length} clickable room hotspot${saved.hotspots.length === 1 ? '' : 's'} from ${file.name}${isSupabaseConfigured ? ' and saved it for all users' : ''}.`);
+    } catch (error) {
+      setStatus(error instanceof Error ? error.message : 'Could not convert this PDF floorplan.');
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  return (
+    <div className="panel rounded-lg p-4">
+      <SectionTitle icon={Upload} title="Upload PDF Floorplan" />
+      <div className="mt-4 grid gap-4">
+        <div>
+          <label className="label" htmlFor="floorplan-pdf">PDF floorplan</label>
+          <input id="floorplan-pdf" className="input mt-1" type="file" accept="application/pdf,.pdf" onChange={handleFileChange} />
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-1">
+          <FilterSelect label="Campus" value={campusCode} setValue={handleCampusChange} options={campuses.map((campus) => campus.code)} />
+          <FilterSelect label="Building" value={buildingCode} setValue={setBuildingCode} options={campusBuildings.map((building) => building.code)} />
+          <div>
+            <label className="label" htmlFor="uploaded-floor">Floor</label>
+            <input id="uploaded-floor" className="input mt-1" value={floor} onChange={(event) => setFloor(event.target.value)} placeholder="Level 4" />
+          </div>
+          <FilterSelect label="Zone" value={zone} setValue={(value) => setZone(value as FloorplanZone)} options={['North', 'South', 'Both']} />
+          <div>
+            <label className="label" htmlFor="room-code-prefix">Room code prefix</label>
+            <input id="room-code-prefix" className="input mt-1 uppercase" value={roomCodePrefix} onChange={(event) => setRoomCodePrefix(event.target.value)} placeholder="CC" />
+            <p className="mt-1 text-xs text-slate-500">PDF labels like 1S.450 become {roomCodePrefix || 'CC'}.1S.450.</p>
+          </div>
+        </div>
+        <button type="button" className="btn-primary w-full" disabled={isProcessing} onClick={uploadPdf}>
+          {isProcessing ? <span className="loading-spinner h-4 w-4" aria-hidden="true" /> : <Upload size={16} />}
+          {isProcessing ? 'Converting PDF' : 'Convert to Floorplan'}
+        </button>
+        {status && (
+          <p className={cn('rounded-md border p-3 text-sm', status.startsWith('Created') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>
+            {status}
+          </p>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function FloorplanViewer({
+  floorplan,
+  roomMetadata,
+  openRoomProfile,
+  onReassess,
+  isReassessing = false,
+  reassessStatus,
+}: {
+  floorplan: FloorplanDefinition;
+  roomMetadata: Map<string, Room>;
+  openRoomProfile: (roomCode: string) => void;
+  onReassess?: (floorplan: FloorplanDefinition) => void;
+  isReassessing?: boolean;
+  reassessStatus?: string;
+}) {
+  const [scale, setScale] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [activeRoomCode, setActiveRoomCode] = useState('');
+  const [isPanning, setIsPanning] = useState(false);
+  const panStart = useRef({ x: 0, y: 0, offsetX: 0, offsetY: 0 });
+
+  useEffect(() => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  }, [floorplan.id]);
+
+  const updateScale = (nextScale: number) => {
+    setScale(Math.min(3, Math.max(0.7, nextScale)));
+  };
+
+  const resetView = () => {
+    setScale(1);
+    setOffset({ x: 0, y: 0 });
+  };
+
+  const handlePointerDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    event.currentTarget.setPointerCapture(event.pointerId);
+    setIsPanning(true);
+    panStart.current = { x: event.clientX, y: event.clientY, offsetX: offset.x, offsetY: offset.y };
+  };
+
+  const handlePointerMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (!isPanning) return;
+    setOffset({
+      x: panStart.current.offsetX + event.clientX - panStart.current.x,
+      y: panStart.current.offsetY + event.clientY - panStart.current.y,
+    });
+  };
+
+  const stopPanning = () => setIsPanning(false);
+  const activeRoom = activeRoomCode ? roomMetadata.get(normalizeRoomCodeKey(activeRoomCode)) : undefined;
+  const activeHotspot = activeRoomCode ? floorplan.hotspots.find((hotspot) => hotspot.roomCode === activeRoomCode) : undefined;
+  const activeRoomName = activeRoom ? roomDisplayName(activeRoom) : activeHotspot?.roomName;
+  const activeRoomType = activeRoom?.type || activeRoom?.pattern || activeHotspot?.roomType;
+
+  return (
+    <div className="panel overflow-hidden rounded-lg">
+      <div className="flex flex-col gap-3 border-b border-slate-200 p-4 lg:flex-row lg:items-center lg:justify-between">
+        <div>
+          <p className="label">{floorplan.campusCode || 'ECU City Campus'}{floorplan.buildingName ? ` / ${floorplan.buildingName}` : ''}</p>
+          <h2 className="mt-1 text-xl font-bold text-slate-950">{floorplan.floor} / {floorplan.zone}</h2>
+          {floorplan.source === 'uploaded-pdf' && <p className="mt-1 text-sm text-slate-500">Uploaded from {floorplan.originalFileName}</p>}
+        </div>
+        <div className="flex flex-wrap gap-2">
+          {onReassess && (
+            <button type="button" className="btn-secondary" disabled={isReassessing} onClick={() => onReassess(floorplan)}>
+              {isReassessing ? <span className="loading-spinner h-4 w-4" aria-hidden="true" /> : <RefreshCcw size={16} />}
+              Re-assess hotspots
+            </button>
+          )}
+          <button type="button" className="btn-secondary" onClick={() => updateScale(scale + 0.2)} aria-label="Zoom in"><Plus size={16} /> Zoom</button>
+          <button type="button" className="btn-secondary" onClick={() => updateScale(scale - 0.2)} aria-label="Zoom out"><Minus size={16} /> Zoom</button>
+          <button type="button" className="btn-secondary" onClick={resetView}><RefreshCcw size={16} /> Reset</button>
+          <button type="button" className="btn-secondary" onClick={resetView}><Maximize2 size={16} /> Fit</button>
+        </div>
+        {reassessStatus && floorplan.source === 'uploaded-pdf' && (
+          <p className={cn('rounded-md border px-3 py-2 text-sm', reassessStatus.startsWith('Re-assessed') ? 'border-emerald-200 bg-emerald-50 text-emerald-800' : 'border-slate-200 bg-slate-50 text-slate-600')}>
+            {reassessStatus}
+          </p>
+        )}
+      </div>
+      <div
+        className={cn('relative h-[62vh] min-h-[420px] overflow-hidden bg-slate-100 touch-none', isPanning ? 'cursor-grabbing' : 'cursor-grab')}
+        onPointerDown={handlePointerDown}
+        onPointerMove={handlePointerMove}
+        onPointerUp={stopPanning}
+        onPointerCancel={stopPanning}
+        onWheel={(event) => {
+          event.preventDefault();
+          updateScale(scale + (event.deltaY < 0 ? 0.12 : -0.12));
+        }}
+      >
+        <div
+          className="absolute left-1/2 top-1/2 w-[min(1120px,92vw)] origin-center"
+          style={{ transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${scale})` }}
+        >
+          <div className="relative rounded-md bg-white shadow-panel">
+            <img src={floorplan.imagePath} alt={floorplan.imageAlt} className="block h-auto w-full select-none rounded-md" draggable={false} />
+            <svg className="absolute inset-0 h-full w-full overflow-visible" viewBox="0 0 100 100" preserveAspectRatio="none" aria-label="Clickable room hotspots">
+              {floorplan.hotspots.map((hotspot) => (
+                <RoomHotspot
+                  key={hotspot.roomCode}
+                  hotspot={hotspot}
+                  room={roomMetadata.get(normalizeRoomCodeKey(hotspot.roomCode))}
+                  activeRoomCode={activeRoomCode}
+                  setActiveRoomCode={setActiveRoomCode}
+                  openRoomProfile={openRoomProfile}
+                />
+              ))}
+            </svg>
+          </div>
+        </div>
+        <div className="pointer-events-none absolute bottom-4 left-4 rounded-md border border-white/80 bg-white/90 px-3 py-2 text-xs font-semibold text-slate-600 shadow-panel">
+          <Move size={14} className="mr-1 inline" /> Drag to pan. Use controls or mouse wheel to zoom.
+        </div>
+        {activeRoomCode && (
+          <div className="pointer-events-none absolute right-4 top-4 max-w-xs rounded-md border border-slate-200 bg-white p-3 text-sm shadow-panel">
+            <p className="font-bold text-slate-950">{activeRoomCode}</p>
+            <p className="mt-1 text-slate-700">{activeRoomName || 'Room metadata unavailable'}</p>
+            {activeRoomType && <p className="mt-1 text-xs font-semibold uppercase tracking-wide text-slate-500">{activeRoomType}</p>}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function RoomHotspot({
+  hotspot,
+  room,
+  activeRoomCode,
+  setActiveRoomCode,
+  openRoomProfile,
+}: {
+  hotspot: FloorplanHotspot;
+  room?: Room;
+  activeRoomCode: string;
+  setActiveRoomCode: (roomCode: string) => void;
+  openRoomProfile: (roomCode: string) => void;
+}) {
+  const isActive = activeRoomCode === hotspot.roomCode;
+  const commonProps = {
+    role: 'button',
+    tabIndex: 0,
+    className: cn('cursor-pointer outline-none transition', isActive ? 'fill-ecu-teal/35 stroke-ecu-black' : 'fill-ecu-teal/15 stroke-ecu-teal hover:fill-ecu-teal/30'),
+    strokeWidth: 0.45,
+    vectorEffect: 'non-scaling-stroke',
+    onPointerDown: (event: ReactPointerEvent<SVGElement>) => event.stopPropagation(),
+    onPointerEnter: () => setActiveRoomCode(hotspot.roomCode),
+    onPointerLeave: () => setActiveRoomCode(''),
+    onFocus: () => setActiveRoomCode(hotspot.roomCode),
+    onBlur: () => setActiveRoomCode(''),
+    onClick: () => openRoomProfile(hotspot.roomCode),
+    onKeyDown: (event: ReactKeyboardEvent<SVGElement>) => {
+      if (event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
+        openRoomProfile(hotspot.roomCode);
+      }
+    },
+    'aria-label': `Open Room Profile for ${hotspot.roomCode}${room ? `, ${roomDisplayName(room)}` : hotspot.roomName ? `, ${hotspot.roomName}` : ''}`,
+  };
+
+  if (hotspot.shape === 'polygon') {
+    const pointPairs = [];
+    for (let index = 0; index < hotspot.points.length; index += 2) {
+      pointPairs.push(`${hotspot.points[index]},${hotspot.points[index + 1]}`);
+    }
+    return <polygon {...commonProps} points={pointPairs.join(' ')} />;
+  }
+
+  const [x, y, width, height] = hotspot.points;
+  return <rect {...commonProps} x={x} y={y} width={width} height={height} rx={1.2} />;
+}
+
 function RoomSearch({
   rooms,
   campuses,
@@ -1467,6 +3537,7 @@ function RoomSearch({
   loadProgress,
   summaryFilter,
   clearSummaryFilter,
+  initialSearch,
 }: {
   rooms: Room[];
   campuses: Campus[];
@@ -1476,8 +3547,9 @@ function RoomSearch({
   loadProgress: RoomDataLoadProgress | null;
   summaryFilter: string | null;
   clearSummaryFilter: () => void;
+  initialSearch: string;
 }) {
-  const [query, setQuery] = useState('');
+  const [query, setQuery] = useState(initialSearch);
   const [campus, setCampus] = useState('All');
   const [category, setCategory] = useState('All');
   const [flags, setFlags] = useState<string[]>([]);
@@ -1486,6 +3558,10 @@ function RoomSearch({
   const deferredQuery = useDeferredValue(query);
   const deferredCapability = useDeferredValue(capability);
   const deferredMinCapacity = useDeferredValue(minCapacity);
+
+  useEffect(() => {
+    setQuery(initialSearch);
+  }, [initialSearch]);
   const searchIndex = useMemo(() => rooms.map((room) => ({
     room,
     displayName: roomDisplayName(room),
@@ -2003,17 +4079,31 @@ function RoomDetail({ room, rooms, setRooms, attributes, openRoomAdmin, requireA
                 </div>
               )}
             </div>
-            <RoomProfileDetailPanel
-              field={selectedField}
-              isOpen={isDetailOpen}
-              editingKey={editingKey}
-              editingValue={editingValue}
-              setEditingValue={setEditingValue}
-              startEdit={startEdit}
-              saveField={saveField}
-              cancelEdit={cancelEdit}
-              close={() => setIsDetailOpen(false)}
-            />
+            <div className="space-y-5 border-slate-200 bg-slate-50 p-4 xl:border-l">
+              <div className="panel rounded-lg">
+                <SectionTitle icon={ImageIcon} title="Floorplan" />
+                <div className="p-4">
+                  <FloorplanPreview imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} />
+                </div>
+              </div>
+              <div className="panel rounded-lg p-4">
+                <h3 className="font-bold text-slate-950">Capabilities</h3>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {room.capabilities.map((capability) => <span key={capability} className="badge border-slate-200 bg-slate-50 text-slate-700">{capability}</span>)}
+                </div>
+              </div>
+              <RoomProfileDetailPanel
+                field={selectedField}
+                isOpen={isDetailOpen}
+                editingKey={editingKey}
+                editingValue={editingValue}
+                setEditingValue={setEditingValue}
+                startEdit={startEdit}
+                saveField={saveField}
+                cancelEdit={cancelEdit}
+                close={() => setIsDetailOpen(false)}
+              />
+            </div>
           </div>
         </div>
 
@@ -2025,18 +4115,6 @@ function RoomDetail({ room, rooms, setRooms, attributes, openRoomAdmin, requireA
             right={<p className="text-sm leading-6 text-slate-700">{room.bookingNotes || 'No booking notes recorded.'}</p>}
           />
           <div className="space-y-5">
-            <div className="panel rounded-lg">
-              <SectionTitle icon={ImageIcon} title="Floorplan" />
-              <div className="p-4">
-                <FloorplanPreview imageUrl={room.floorplanImageUrl} roomName={roomDisplayName(room)} />
-              </div>
-            </div>
-            <div className="panel rounded-lg p-4">
-              <h3 className="font-bold text-slate-950">Capabilities</h3>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {room.capabilities.map((capability) => <span key={capability} className="badge border-slate-200 bg-slate-50 text-slate-700">{capability}</span>)}
-              </div>
-            </div>
             <div className="panel rounded-lg p-4">
               <h3 className="font-bold text-slate-950">Data Quality</h3>
               <div className="mt-3 space-y-2">
@@ -2178,7 +4256,7 @@ function FieldDetailTerm({ label, value }: { label: string; value: string }) {
   );
 }
 
-function TwoColumnPanel({ leftTitle, rightTitle, left, right }: { leftTitle: string; rightTitle: string; left: React.ReactNode; right: React.ReactNode }) {
+function TwoColumnPanel({ leftTitle, rightTitle, left, right }: { leftTitle: string; rightTitle: string; left: ReactNode; right: ReactNode }) {
   return (
     <div className="grid gap-6 lg:grid-cols-2">
       <div className="panel rounded-lg p-4">
@@ -3810,7 +5888,7 @@ function PatternOverviewCard({
   );
 }
 
-function PatternOverviewBlock({ title, children, className }: { title: string; children: React.ReactNode; className?: string }) {
+function PatternOverviewBlock({ title, children, className }: { title: string; children: ReactNode; className?: string }) {
   return (
     <section className={cn('border border-slate-200 bg-white p-3', className)}>
       <h4 className="mb-2 font-bold text-slate-950">{title}</h4>

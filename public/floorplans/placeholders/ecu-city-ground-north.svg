@@ -1,0 +1,21 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">ECU City Campus Ground North placeholder floorplan</title>
+  <desc id="desc">Placeholder floorplan with sample rooms for hotspot mapping.</desc>
+  <rect width="1200" height="720" fill="#f8fafc"/>
+  <rect x="72" y="82" width="1056" height="556" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="6"/>
+  <path d="M120 360h960" stroke="#94a3b8" stroke-width="18" stroke-linecap="round"/>
+  <g fill="#ecfeff" stroke="#2fb7a6" stroke-width="4">
+    <rect x="144" y="144" width="288" height="173" rx="10"/>
+    <rect x="516" y="144" width="264" height="173" rx="10"/>
+    <rect x="840" y="166" width="168" height="137" rx="10"/>
+    <path d="M216 432l276-29 84 144-276 58z"/>
+  </g>
+  <g font-family="Arial, sans-serif" fill="#151817" font-size="28" font-weight="700">
+    <text x="196" y="236">CC.1N.GST02</text>
+    <text x="560" y="236">CC.1N.GST03</text>
+    <text x="872" y="236">CC.1N.GC01</text>
+    <text x="282" y="520">CC.1N.GST01</text>
+  </g>
+  <text x="80" y="52" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#1f8f7d">Ground North</text>
+  <text x="80" y="680" font-family="Arial, sans-serif" font-size="22" fill="#64748b">Replace this placeholder with a real building floorplan in public/floorplans/.</text>
+</svg>

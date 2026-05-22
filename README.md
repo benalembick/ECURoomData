@@ -18,6 +18,8 @@ Room Data Hub is a TypeScript React MVP for managing ECU rooms as governed enter
 - Governance workflow dashboard with approvals, history, and generated implementation checklists
 - CSV import wizard with column mapping, dynamic field creation, validation preview, and commit flow
 - CSV export from filtered room search results
+- Issues Register section generated from the post occupancy issue tracker workbook
+- Issue dashboards, searchable register, comments, status/category editing, CSV export, and PDF reports
 
 ## Quick Start
 
@@ -27,6 +29,28 @@ npm run dev
 ```
 
 The app runs in demo data mode until Supabase credentials are configured.
+
+## Issues Register Import
+
+The uploaded workbook is imported into `src/data/issuesRegister.ts` for the working scaffold. The importer reads every worksheet except the guide/list tabs, uses the worksheet name as the owning business unit, extracts each worksheet tab colour from the XLSX XML, flexibly maps common issue columns, and stores any unmapped columns as issue metadata.
+
+To regenerate the issue seed data from the workbook:
+
+```bash
+npm run import:issues -- "C:/Users/balembic/Downloads/ECU Post Occupancy issues Register (1).xlsx"
+```
+
+The Issues Register area includes:
+
+- Issue dashboard landing page with status, category, priority, business unit, change request, and aging metrics
+- All Issues, Change Requests, and Defects register views
+- Global search, column sorting, quick filters, responsive table layout, and pagination
+- Business unit colour badges based on worksheet tab colours
+- Editable category, change request flag, and status fields
+- Comment timeline with author, date/time, comment text, and status at time of comment
+- Room-code click-through to the room profile when a matching room exists
+- CSV export, dashboard PDF export, and issue detail PDF export
+- Admin view for categories, statuses, business unit colours, and commenter names
 
 ## Supabase Setup
 
@@ -80,6 +104,15 @@ The import wizard writes to Supabase when configured and authenticated:
 - `room_attribute_values`
 - `room_change_log`
 
+The Issues Register migration adds:
+
+- `business_units`
+- `issues`
+- `issue_comments`
+- `issue_categories`
+- `issue_statuses`
+- `issue_attachments_or_references`
+
 If Supabase is not configured, the import wizard still works in demo mode, but imported data is held only in browser state and is lost on refresh.
 
 Campus/building management also writes to Supabase when configured. The signed-in user needs `admin` role because campus, building, and floor reference tables are governed configuration data.
@@ -95,6 +128,7 @@ The schema uses a hybrid model:
 - Integration readiness in `systems`, `system_mappings`, and `transformation_rules`
 - Governance in `change_requests`, `approvals`, `implementation_templates`, and `implementation_tasks`
 - Audit and import records in `room_change_log` and `import_jobs`
+- Post occupancy issues in `issues`, linked to `business_units`, `issue_categories`, `issue_statuses`, comments, and attachment/reference records
 
 ## Roles
 

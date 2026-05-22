@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 720" role="img" aria-labelledby="title desc">
+  <title id="title">ECU City Campus Level 2 combined placeholder floorplan</title>
+  <desc id="desc">Placeholder floorplan with sample North and South rooms for hotspot mapping.</desc>
+  <rect width="1200" height="720" fill="#f8fafc"/>
+  <rect x="72" y="82" width="1056" height="556" rx="24" fill="#ffffff" stroke="#cbd5e1" stroke-width="6"/>
+  <path d="M600 112v500" stroke="#64748b" stroke-width="12" stroke-linecap="round"/>
+  <text x="292" y="128" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#64748b">North</text>
+  <text x="820" y="128" font-family="Arial, sans-serif" font-size="24" font-weight="700" fill="#64748b">South</text>
+  <path d="M116 360h968" stroke="#94a3b8" stroke-width="18" stroke-linecap="round"/>
+  <g fill="#f0fdf4" stroke="#1f8f7d" stroke-width="4">
+    <rect x="96" y="130" width="156" height="122" rx="10"/>
+    <rect x="312" y="130" width="168" height="122" rx="10"/>
+    <rect x="732" y="130" width="156" height="122" rx="10"/>
+    <rect x="936" y="130" width="156" height="122" rx="10"/>
+    <rect x="216" y="432" width="240" height="137" rx="10"/>
+    <rect x="744" y="432" width="240" height="137" rx="10"/>
+  </g>
+  <g font-family="Arial, sans-serif" fill="#151817" font-size="28" font-weight="700">
+    <text x="124" y="200">CC.1N.201</text>
+    <text x="338" y="200">CC.1N.204</text>
+    <text x="760" y="200">CC.1S.201</text>
+    <text x="962" y="200">CC.1S.208</text>
+    <text x="258" y="510">CC.1N.230</text>
+    <text x="786" y="510">CC.1S.230</text>
+  </g>
+  <text x="80" y="52" font-family="Arial, sans-serif" font-size="30" font-weight="700" fill="#1f8f7d">Level 2 North and South</text>
+  <text x="80" y="680" font-family="Arial, sans-serif" font-size="22" fill="#64748b">Replace this placeholder with a real building floorplan in public/floorplans/.</text>
+</svg>
