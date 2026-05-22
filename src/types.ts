@@ -171,6 +171,109 @@ export interface ChangeRequest {
   history: string[];
 }
 
+export interface GovernanceRequestType {
+  id: string;
+  name: string;
+  description?: string;
+  category: string;
+  riskLevel: 'standard' | 'high' | 'critical';
+  requiresRoom: boolean;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+export interface GovernanceSystem {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  ownerTeam: string;
+  systemType: string;
+  isActive: boolean;
+  sortOrder: number;
+}
+
+export type GovernanceConditionOperator = 'equals' | 'not_equals' | 'contains' | 'is_set' | 'is_not_set' | 'greater_than' | 'less_than' | 'in';
+export type GovernanceActionType = 'require_approval' | 'notify_system' | 'set_risk' | 'generate_template_tasks' | 'flag_for_review';
+
+export interface GovernanceRuleCondition {
+  id: string;
+  ruleId: string;
+  attributeKey: string;
+  operator: GovernanceConditionOperator;
+  value?: string;
+  sortOrder: number;
+}
+
+export interface GovernanceRuleAction {
+  id: string;
+  ruleId: string;
+  actionType: GovernanceActionType;
+  target?: string;
+  parameters: Record<string, unknown>;
+  sortOrder: number;
+}
+
+export interface GovernanceRule {
+  id: string;
+  name: string;
+  description?: string;
+  requestTypeId?: string;
+  patternId?: string;
+  appliesTo: 'all' | 'pattern' | 'request_type';
+  riskLevel: 'standard' | 'high' | 'critical';
+  isActive: boolean;
+  sortOrder: number;
+  conditions: GovernanceRuleCondition[];
+  actions: GovernanceRuleAction[];
+}
+
+export interface GovernanceTemplateTask {
+  id: string;
+  templateId: string;
+  title: string;
+  systemId?: string;
+  ownerTeam: string;
+  estimatedDays: number;
+  instructions?: string;
+  sortOrder: number;
+}
+
+export interface GovernanceTemplate {
+  id: string;
+  name: string;
+  requestTypeId?: string;
+  patternId?: string;
+  description?: string;
+  isActive: boolean;
+  tasks: GovernanceTemplateTask[];
+}
+
+export interface GovernancePatternConfig {
+  id: string;
+  patternId: string;
+  approvalStages: { role: DatabaseRole; label: string }[];
+  impactedSystemCodes: string[];
+  defaultRiskLevel: 'standard' | 'high' | 'critical';
+  notes?: string;
+}
+
+export interface RuleEvaluationContext {
+  room?: Room;
+  requestTypeId: string;
+  patternId?: string;
+  proposedAttributes?: Record<string, unknown>;
+}
+
+export interface RuleEvaluationResult {
+  matchedRules: GovernanceRule[];
+  requiredApprovals: { stage: number; role: DatabaseRole; label: string }[];
+  impactedSystems: string[];
+  riskLevel: 'standard' | 'high' | 'critical';
+  flaggedForReview: boolean;
+  templateIds: string[];
+}
+
 export interface ImportPreviewRow {
   id: number;
   source: Record<string, string>;

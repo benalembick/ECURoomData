@@ -56,7 +56,8 @@ import {
   rooms as initialRooms,
   transformationRules,
 } from './data/mockData';
-import type { AttributeDefinition, AttributeGroup, Building, BusinessUnit, Campus, ChangeRequest, DatabaseRole, ImportPreviewRow, Issue, IssueAttachmentReference, IssueCategory, IssueComment, IssueStatus, Room, RoomPattern, TaskStatus, UserProfile } from './types';
+import type { AttributeDefinition, AttributeGroup, Building, BusinessUnit, Campus, ChangeRequest, DatabaseRole, GovernanceRequestType, GovernanceRule, GovernanceSystem, GovernanceTemplate, ImportPreviewRow, Issue, IssueAttachmentReference, IssueCategory, IssueComment, IssueStatus, Room, RoomPattern, RuleEvaluationResult, TaskStatus, UserProfile } from './types';
+import { evaluateGovernanceRules, loadGovernanceRequestTypes, loadGovernanceRules, loadGovernanceSystems, loadGovernanceTemplates, saveGovernanceRule, deleteGovernanceRule, saveRuleConditionsAndActions, saveGovernanceTemplate, deleteGovernanceTemplate, saveTemplateTask, deleteTemplateTask, saveGovernanceRequestType, deleteGovernanceRequestType, saveGovernanceSystem, deleteGovernanceSystem, saveChangeRequest } from './services/governanceService';
 import { cn, downloadCsv, titleCase } from './lib/utils';
 import { buildingDisplayName, floorNameFromCode, parseRoomCode } from './lib/roomCode';
 import { isSupabaseConfigured, supabase } from './lib/supabase';
@@ -396,6 +397,10 @@ export function App() {
   const [attributeDefinitions, setAttributeDefinitions] = useState<AttributeDefinition[]>(initialAttributeDefinitions);
   const [attributeGroups, setAttributeGroups] = useState<AttributeGroup[]>(() => getAttributeGroupsFromDefinitions(initialAttributeDefinitions));
   const [changeRequests, setChangeRequests] = useState<ChangeRequest[]>(initialChangeRequests);
+  const [governanceRequestTypes, setGovernanceRequestTypes] = useState<GovernanceRequestType[]>([]);
+  const [governanceSystems, setGovernanceSystems] = useState<GovernanceSystem[]>([]);
+  const [governanceRules, setGovernanceRules] = useState<GovernanceRule[]>([]);
+  const [governanceTemplates, setGovernanceTemplates] = useState<GovernanceTemplate[]>([]);
   const [issues, setIssues] = useState<Issue[]>(importedIssues);
   const [issueBusinessUnits, setIssueBusinessUnits] = useState<BusinessUnit[]>(initialIssueBusinessUnits);
   const [issueCategoriesData, setIssueCategoriesData] = useState<IssueCategory[]>(initialIssueCategories);
@@ -531,6 +536,16 @@ export function App() {
           return colour ? { ...issue, businessUnitColour: colour } : issue;
         }));
       }
+      const [govTypes, govSystems, govRules, govTemplates] = await Promise.allSettled([
+        loadGovernanceRequestTypes(),
+        loadGovernanceSystems(),
+        loadGovernanceRules(),
+        loadGovernanceTemplates(),
+      ]);
+      if (govTypes.status === 'fulfilled') setGovernanceRequestTypes(govTypes.value);
+      if (govSystems.status === 'fulfilled') setGovernanceSystems(govSystems.value);
+      if (govRules.status === 'fulfilled') setGovernanceRules(govRules.value);
+      if (govTemplates.status === 'fulfilled') setGovernanceTemplates(govTemplates.value);
     };
 
     supabaseClient.auth.getSession().then(({ data }) => {
@@ -875,8 +890,32 @@ export function App() {
           {view === 'data-fields' && canManageFieldConfig && <DataFieldManagement attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} groups={attributeGroups} setGroups={setAttributeGroups} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'locations' && <CampusManagement rooms={rooms} setRooms={setRooms} campuses={campusesData} setCampuses={setCampusesData} buildings={buildingsData} setBuildings={setBuildingsData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'patterns' && <Patterns rooms={rooms} setRooms={setRooms} patterns={roomPatterns} setPatterns={setRoomPatterns} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
-          {view === 'rules' && <Rules />}
-          {view === 'governance' && <Governance requests={changeRequests} setRequests={setChangeRequests} rooms={rooms} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
+          {view === 'rules' && (
+            <GovernanceRulesAdmin
+              requestTypes={governanceRequestTypes}
+              setRequestTypes={setGovernanceRequestTypes}
+              systems={governanceSystems}
+              setSystems={setGovernanceSystems}
+              rules={governanceRules}
+              setRules={setGovernanceRules}
+              templates={governanceTemplates}
+              setTemplates={setGovernanceTemplates}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+              canManage={canManageUsers}
+            />
+          )}
+          {view === 'governance' && (
+            <Governance
+              requests={changeRequests}
+              setRequests={setChangeRequests}
+              rooms={rooms}
+              requestTypes={governanceRequestTypes}
+              rules={governanceRules}
+              systems={governanceSystems}
+              templates={governanceTemplates}
+              requireAuthenticatedEdit={requireAuthenticatedEdit}
+            />
+          )}
           {view === 'import' && <ImportWizard rooms={rooms} setRooms={setRooms} attributes={attributeDefinitions} setAttributes={setAttributeDefinitions} refreshRoomData={refreshRoomData} requireAuthenticatedEdit={requireAuthenticatedEdit} />}
           {view === 'backups' && canManageUsers && <DataBackups refreshRoomData={refreshRoomData} />}
           {view === 'users' && canManageUsers && <UserManagement currentUser={authProfile} />}
@@ -996,6 +1035,27 @@ function PageHeader({ title, description, action }: { title: string; description
         <p className="mt-1 max-w-3xl text-sm text-slate-600">{description}</p>
       </div>
       {action}
+    </div>
+  );
+}
+
+function EmptyState({ icon: Icon, title, description }: { icon: typeof Home; title: string; description: string }) {
+  return (
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white px-8 py-14 text-center">
+      <div className="mb-3 rounded-full bg-slate-100 p-3 text-slate-400">
+        <Icon size={24} />
+      </div>
+      <p className="font-semibold text-slate-700">{title}</p>
+      <p className="mt-1 max-w-sm text-sm text-slate-400">{description}</p>
+    </div>
+  );
+}
+
+function ErrorMessage({ message, onClose }: { message: string; onClose: () => void }) {
+  return (
+    <div className="mb-4 flex items-start justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+      <span>{message}</span>
+      <button type="button" className="shrink-0 font-bold hover:text-red-900" onClick={onClose}>×</button>
     </div>
   );
 }
@@ -6442,32 +6502,1040 @@ function MiniList({ title, items }: { title: string; items: string[] }) {
   );
 }
 
-function Rules() {
+type GovernanceRulesAdminTab = 'request-types' | 'rules' | 'templates' | 'systems';
+
+function GovernanceRulesAdmin({
+  requestTypes,
+  setRequestTypes,
+  systems,
+  setSystems,
+  rules,
+  setRules,
+  templates,
+  setTemplates,
+  requireAuthenticatedEdit,
+  canManage,
+}: {
+  requestTypes: GovernanceRequestType[];
+  setRequestTypes: (value: GovernanceRequestType[]) => void;
+  systems: GovernanceSystem[];
+  setSystems: (value: GovernanceSystem[]) => void;
+  rules: GovernanceRule[];
+  setRules: (value: GovernanceRule[]) => void;
+  templates: GovernanceTemplate[];
+  setTemplates: (value: GovernanceTemplate[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  canManage: boolean;
+}) {
+  const [tab, setTab] = useState<GovernanceRulesAdminTab>('request-types');
+  const [error, setError] = useState('');
+
+  const tabs: { id: GovernanceRulesAdminTab; label: string }[] = [
+    { id: 'request-types', label: 'Request Types' },
+    { id: 'rules', label: 'Governance Rules' },
+    { id: 'templates', label: 'Implementation Templates' },
+    { id: 'systems', label: 'Downstream Systems' },
+  ];
+
   return (
     <>
-      <PageHeader title="Transformation Rules" description="Rules describe how governed central room data maps into O365, Archibus, timetabling, Appspace, Momentus, security, and maintenance systems." />
-      <div className="grid gap-4">
-        {transformationRules.map((rule) => (
-          <div key={rule.id} className="panel rounded-lg p-4">
-            <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
-              <div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <h3 className="text-lg font-bold text-slate-950">{rule.name}</h3>
-                  <StatusBadge status={rule.risk === 'high' ? 'High risk' : 'Standard'} />
-                </div>
-                <p className="mt-1 text-sm text-slate-600">{rule.description}</p>
-              </div>
-              <StatusBadge status={rule.active ? 'Active' : 'Inactive'} />
+      <PageHeader
+        title="Governance Rules Engine"
+        description="Configure request types, approval rules, implementation templates, and downstream system integrations."
+      />
+      {error && <ErrorMessage message={error} onClose={() => setError('')} />}
+      <div className="mb-6 flex flex-wrap gap-2 border-b border-slate-200 pb-0">
+        {tabs.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            onClick={() => setTab(t.id)}
+            className={cn(
+              '-mb-px border-b-2 px-4 py-2 text-sm font-semibold transition',
+              tab === t.id
+                ? 'border-ecu-teal text-ecu-teal'
+                : 'border-transparent text-slate-500 hover:text-slate-800',
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'request-types' && (
+        <GovernanceRequestTypesTab
+          requestTypes={requestTypes}
+          setRequestTypes={setRequestTypes}
+          requireAuthenticatedEdit={requireAuthenticatedEdit}
+          canManage={canManage}
+          setError={setError}
+        />
+      )}
+      {tab === 'rules' && (
+        <GovernanceRulesTab
+          rules={rules}
+          setRules={setRules}
+          requestTypes={requestTypes}
+          systems={systems}
+          requireAuthenticatedEdit={requireAuthenticatedEdit}
+          canManage={canManage}
+          setError={setError}
+        />
+      )}
+      {tab === 'templates' && (
+        <GovernanceTemplatesTab
+          templates={templates}
+          setTemplates={setTemplates}
+          requestTypes={requestTypes}
+          systems={systems}
+          requireAuthenticatedEdit={requireAuthenticatedEdit}
+          canManage={canManage}
+          setError={setError}
+        />
+      )}
+      {tab === 'systems' && (
+        <GovernanceSystemsTab
+          systems={systems}
+          setSystems={setSystems}
+          requireAuthenticatedEdit={requireAuthenticatedEdit}
+          canManage={canManage}
+          setError={setError}
+        />
+      )}
+    </>
+  );
+}
+
+const govRiskOptions = ['standard', 'high', 'critical'] as const;
+const govRtCategories = ['Room Attributes', 'Booking Configuration', 'Lifecycle', 'Access', 'Integration', 'General'];
+
+const riskBadge = (risk: 'standard' | 'high' | 'critical') => {
+  if (risk === 'critical') return 'border-red-200 bg-red-50 text-red-700';
+  if (risk === 'high') return 'border-amber-200 bg-amber-50 text-amber-700';
+  return 'border-emerald-200 bg-emerald-50 text-emerald-700';
+};
+
+function blankRequestType(): Omit<GovernanceRequestType, 'id'> {
+  return { name: '', description: '', category: 'General', riskLevel: 'standard', requiresRoom: true, sortOrder: 100, isActive: true };
+}
+
+function GovernanceRequestTypesTab({
+  requestTypes,
+  setRequestTypes,
+  requireAuthenticatedEdit,
+  canManage,
+  setError,
+}: {
+  requestTypes: GovernanceRequestType[];
+  setRequestTypes: (value: GovernanceRequestType[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  canManage: boolean;
+  setError: (msg: string) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState<Omit<GovernanceRequestType, 'id'>>(blankRequestType);
+  const [saving, setSaving] = useState(false);
+
+  const openNew = () => {
+    if (!requireAuthenticatedEdit('add request types')) return;
+    setEditId(null);
+    setForm(blankRequestType());
+    setShowForm(true);
+  };
+
+  const openEdit = (rt: GovernanceRequestType) => {
+    if (!requireAuthenticatedEdit('edit request types')) return;
+    setEditId(rt.id);
+    setForm({ name: rt.name, description: rt.description ?? '', category: rt.category, riskLevel: rt.riskLevel, requiresRoom: rt.requiresRoom, sortOrder: rt.sortOrder, isActive: rt.isActive });
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!form.name.trim() || !form.category.trim()) return;
+    setSaving(true);
+    try {
+      const saved = await saveGovernanceRequestType({ ...(editId ? { id: editId } : {}), ...form, name: form.name.trim() });
+      const updated: GovernanceRequestType = { id: editId ?? saved, ...form, name: form.name.trim() };
+      setRequestTypes(editId ? requestTypes.map((r) => r.id === editId ? updated : r) : [...requestTypes, updated]);
+      setShowForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save request type.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (rt: GovernanceRequestType) => {
+    if (!requireAuthenticatedEdit('delete request types')) return;
+    if (!confirm(`Delete "${rt.name}"? Rules referencing it will be unlinked.`)) return;
+    try {
+      await deleteGovernanceRequestType(rt.id);
+      setRequestTypes(requestTypes.filter((r) => r.id !== rt.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete request type.');
+    }
+  };
+
+  const grouped = requestTypes.reduce<Record<string, GovernanceRequestType[]>>((acc, rt) => {
+    (acc[rt.category] = acc[rt.category] ?? []).push(rt);
+    return acc;
+  }, {});
+
+  return (
+    <div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <button type="button" className="btn-primary" onClick={openNew}><Plus size={16} /> New request type</button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="mb-6 rounded-lg border border-ecu-teal/30 bg-slate-50 p-5">
+          <p className="mb-4 font-semibold text-slate-900">{editId ? 'Edit request type' : 'New request type'}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="label">Name <span className="text-red-500">*</span></label>
+              <input className="input mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Capacity Change" />
             </div>
-            <div className="mt-4 grid gap-4 lg:grid-cols-[0.8fr_1.2fr_0.7fr]">
-              <MiniList title="Condition" items={[rule.condition]} />
-              <MiniList title="Generated outputs" items={rule.outputs} />
-              <MiniList title="Systems" items={rule.systems} />
+            <div className="sm:col-span-2">
+              <label className="label">Description</label>
+              <input className="input mt-1" value={form.description ?? ''} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What does this request type cover?" />
+            </div>
+            <div>
+              <label className="label">Category <span className="text-red-500">*</span></label>
+              <select className="input mt-1" value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })}>
+                {govRtCategories.map((c) => <option key={c}>{c}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Risk level</label>
+              <select className="input mt-1" value={form.riskLevel} onChange={(e) => setForm({ ...form, riskLevel: e.target.value as GovernanceRequestType['riskLevel'] })}>
+                {govRiskOptions.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Sort order</label>
+              <input className="input mt-1" type="number" value={form.sortOrder} onChange={(e) => setForm({ ...form, sortOrder: Number(e.target.value) })} />
+            </div>
+            <div className="flex items-end gap-4 pb-1">
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <input type="checkbox" className="h-4 w-4" checked={form.requiresRoom} onChange={(e) => setForm({ ...form, requiresRoom: e.target.checked })} />
+                Requires a room to be linked
+              </label>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button type="button" className="btn-primary" disabled={!form.name.trim() || saving} onClick={() => void handleSave()}>{saving ? 'Saving…' : editId ? 'Save changes' : 'Create'}</button>
+            <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!requestTypes.length && !showForm && (
+        <EmptyState icon={GitBranch} title="No request types configured" description={canManage ? 'Click "New request type" to add one, or run the governance seed migration.' : 'No request types have been configured yet.'} />
+      )}
+
+      <div className="grid gap-6">
+        {Object.entries(grouped).map(([category, items]) => (
+          <div key={category}>
+            <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-slate-500">{category}</h3>
+            <div className="grid gap-2">
+              {items.map((rt) => (
+                <div key={rt.id} className="flex flex-col gap-2 rounded-lg border border-slate-200 bg-white p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="font-semibold text-slate-900">{rt.name}</p>
+                    {rt.description && <p className="mt-0.5 text-sm text-slate-500">{rt.description}</p>}
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className={cn('badge text-xs', riskBadge(rt.riskLevel))}>{rt.riskLevel.charAt(0).toUpperCase() + rt.riskLevel.slice(1)} risk</span>
+                    {!rt.requiresRoom && <span className="badge border-slate-200 bg-slate-50 text-slate-600 text-xs">No room required</span>}
+                    {canManage && (
+                      <>
+                        <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => openEdit(rt)}><Pencil size={13} /> Edit</button>
+                        <button type="button" className="btn-secondary px-2 py-1 text-xs text-red-600 hover:border-red-300 hover:bg-red-50" onClick={() => void handleDelete(rt)}><Trash2 size={13} /></button>
+                      </>
+                    )}
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
         ))}
       </div>
-    </>
+    </div>
+  );
+}
+
+type DraftCondition = { attributeKey: string; operator: GovernanceRuleCondition['operator']; value: string };
+type DraftAction = { actionType: GovernanceRuleAction['actionType']; target: string; label: string; riskLevel: string; reason: string };
+
+function blankDraftAction(): DraftAction {
+  return { actionType: 'require_approval', target: 'approver', label: '', riskLevel: 'high', reason: '' };
+}
+
+function GovernanceRulesTab({
+  rules,
+  setRules,
+  requestTypes,
+  systems,
+  requireAuthenticatedEdit,
+  canManage,
+  setError,
+}: {
+  rules: GovernanceRule[];
+  setRules: (value: GovernanceRule[]) => void;
+  requestTypes: GovernanceRequestType[];
+  systems: GovernanceSystem[];
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  canManage: boolean;
+  setError: (msg: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState<string | null>(null);
+  const [showForm, setShowForm] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [ruleName, setRuleName] = useState('');
+  const [ruleDesc, setRuleDesc] = useState('');
+  const [ruleRtId, setRuleRtId] = useState('');
+  const [ruleAppliesTo, setRuleAppliesTo] = useState<GovernanceRule['appliesTo']>('all');
+  const [ruleRisk, setRuleRisk] = useState<GovernanceRule['riskLevel']>('standard');
+  const [conditions, setConditions] = useState<DraftCondition[]>([]);
+  const [actions, setActions] = useState<DraftAction[]>([blankDraftAction()]);
+
+  const addCondition = () => setConditions([...conditions, { attributeKey: '', operator: 'equals', value: '' }]);
+  const removeCondition = (i: number) => setConditions(conditions.filter((_, idx) => idx !== i));
+  const updateCondition = (i: number, patch: Partial<DraftCondition>) =>
+    setConditions(conditions.map((c, idx) => idx === i ? { ...c, ...patch } : c));
+
+  const addAction = () => setActions([...actions, blankDraftAction()]);
+  const removeAction = (i: number) => setActions(actions.filter((_, idx) => idx !== i));
+  const updateAction = (i: number, patch: Partial<DraftAction>) =>
+    setActions(actions.map((a, idx) => idx === i ? { ...a, ...patch } : a));
+
+  const resetForm = () => {
+    setRuleName(''); setRuleDesc(''); setRuleRtId(''); setRuleAppliesTo('all'); setRuleRisk('standard');
+    setConditions([]); setActions([blankDraftAction()]);
+  };
+
+  const openNew = () => {
+    if (!requireAuthenticatedEdit('add governance rules')) return;
+    resetForm();
+    setShowForm(true);
+  };
+
+  const handleSave = async () => {
+    if (!ruleName.trim()) return;
+    setSaving(true);
+    try {
+      const ruleId = await saveGovernanceRule({
+        id: '',
+        name: ruleName.trim(),
+        description: ruleDesc.trim() || undefined,
+        requestTypeId: ruleRtId || undefined,
+        appliesTo: ruleAppliesTo,
+        riskLevel: ruleRisk,
+        isActive: true,
+        sortOrder: (rules.length + 1) * 10,
+      });
+
+      const builtConditions = conditions.filter((c) => c.attributeKey.trim()).map((c, i) => ({
+        attributeKey: c.attributeKey.trim(),
+        operator: c.operator,
+        value: c.value.trim() || undefined,
+        sortOrder: i,
+      }));
+      const builtActions = actions.map((a, i) => {
+        const params: Record<string, unknown> = {};
+        if (a.actionType === 'require_approval') { params.label = a.label || a.target; params.stage = i + 1; }
+        if (a.actionType === 'set_risk') params.risk_level = a.riskLevel;
+        if (a.actionType === 'flag_for_review') params.reason = a.reason;
+        return { actionType: a.actionType, target: a.target || undefined, parameters: params, sortOrder: i };
+      });
+      await saveRuleConditionsAndActions(ruleId, builtConditions, builtActions);
+
+      const newRule: GovernanceRule = {
+        id: ruleId,
+        name: ruleName.trim(),
+        description: ruleDesc.trim() || undefined,
+        requestTypeId: ruleRtId || undefined,
+        appliesTo: ruleAppliesTo,
+        riskLevel: ruleRisk,
+        isActive: true,
+        sortOrder: (rules.length + 1) * 10,
+        conditions: builtConditions.map((c, i) => ({ ...c, id: `${ruleId}-c${i}`, ruleId })),
+        actions: builtActions.map((a, i) => ({ ...a, id: `${ruleId}-a${i}`, ruleId })),
+      };
+      setRules([...rules, newRule]);
+      setShowForm(false);
+      resetForm();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save rule.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDelete = async (ruleId: string) => {
+    if (!requireAuthenticatedEdit('delete governance rules')) return;
+    if (!confirm('Delete this rule? This cannot be undone.')) return;
+    setDeleting(ruleId);
+    try {
+      await deleteGovernanceRule(ruleId);
+      setRules(rules.filter((r) => r.id !== ruleId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete rule.');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
+  const handleToggle = async (rule: GovernanceRule) => {
+    if (!requireAuthenticatedEdit('update governance rules')) return;
+    const updated = { ...rule, isActive: !rule.isActive };
+    try {
+      await saveGovernanceRule(updated);
+      setRules(rules.map((r) => r.id === rule.id ? updated : r));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not update rule.');
+    }
+  };
+
+  const getRtName = (id?: string) => requestTypes.find((rt) => rt.id === id)?.name ?? 'All request types';
+  const getActionLabel = (action: GovernanceRule['actions'][0]) => {
+    if (action.actionType === 'require_approval') return `Require approval: ${action.parameters.label ?? action.target}`;
+    if (action.actionType === 'notify_system') return `Notify system: ${systems.find((s) => s.code === action.target)?.name ?? action.target}`;
+    if (action.actionType === 'set_risk') return `Set risk: ${String(action.parameters.risk_level ?? '')}`;
+    if (action.actionType === 'flag_for_review') return `Flag for review`;
+    return action.actionType;
+  };
+
+  const condOperators: { value: GovernanceRuleCondition['operator']; label: string }[] = [
+    { value: 'equals', label: 'equals' }, { value: 'not_equals', label: 'not equals' },
+    { value: 'contains', label: 'contains' }, { value: 'is_set', label: 'is set' },
+    { value: 'is_not_set', label: 'is not set' }, { value: 'greater_than', label: '>' },
+    { value: 'less_than', label: '<' }, { value: 'in', label: 'in (comma list)' },
+  ];
+  const actionTypes: { value: GovernanceRuleAction['actionType']; label: string }[] = [
+    { value: 'require_approval', label: 'Require approval' },
+    { value: 'notify_system', label: 'Notify system' },
+    { value: 'set_risk', label: 'Set risk level' },
+    { value: 'flag_for_review', label: 'Flag for review' },
+    { value: 'generate_template_tasks', label: 'Generate template tasks' },
+  ];
+
+  return (
+    <div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <button type="button" className="btn-primary" onClick={openNew}><Plus size={16} /> New rule</button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="mb-6 rounded-lg border border-ecu-teal/30 bg-slate-50 p-5">
+          <p className="mb-4 font-semibold text-slate-900">New governance rule</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="label">Rule name <span className="text-red-500">*</span></label>
+              <input className="input mt-1" value={ruleName} onChange={(e) => setRuleName(e.target.value)} placeholder="e.g. Booking Change — Requires Approval" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Description</label>
+              <input className="input mt-1" value={ruleDesc} onChange={(e) => setRuleDesc(e.target.value)} placeholder="When and why this rule fires" />
+            </div>
+            <div>
+              <label className="label">Applies to</label>
+              <select className="input mt-1" value={ruleAppliesTo} onChange={(e) => setRuleAppliesTo(e.target.value as GovernanceRule['appliesTo'])}>
+                <option value="all">All requests</option>
+                <option value="request_type">Specific request type</option>
+              </select>
+            </div>
+            {ruleAppliesTo === 'request_type' && (
+              <div>
+                <label className="label">Request type</label>
+                <select className="input mt-1" value={ruleRtId} onChange={(e) => setRuleRtId(e.target.value)}>
+                  <option value="">— select —</option>
+                  {requestTypes.map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="label">Risk level</label>
+              <select className="input mt-1" value={ruleRisk} onChange={(e) => setRuleRisk(e.target.value as GovernanceRule['riskLevel'])}>
+                {govRiskOptions.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+              </select>
+            </div>
+          </div>
+
+          {/* Conditions */}
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="label">Conditions <span className="font-normal text-slate-400">(optional — leave empty to always fire)</span></p>
+              <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={addCondition}><Plus size={13} /> Add condition</button>
+            </div>
+            {conditions.map((cond, i) => (
+              <div key={i} className="mb-2 grid grid-cols-[1fr_auto_1fr_auto] items-center gap-2">
+                <input className="input" placeholder="Attribute key" value={cond.attributeKey} onChange={(e) => updateCondition(i, { attributeKey: e.target.value })} />
+                <select className="input" value={cond.operator} onChange={(e) => updateCondition(i, { operator: e.target.value as GovernanceRuleCondition['operator'] })}>
+                  {condOperators.map((op) => <option key={op.value} value={op.value}>{op.label}</option>)}
+                </select>
+                {['is_set', 'is_not_set'].includes(cond.operator)
+                  ? <span />
+                  : <input className="input" placeholder="Value" value={cond.value} onChange={(e) => updateCondition(i, { value: e.target.value })} />
+                }
+                <button type="button" className="text-slate-400 hover:text-red-500" onClick={() => removeCondition(i)}><Trash2 size={15} /></button>
+              </div>
+            ))}
+          </div>
+
+          {/* Actions */}
+          <div className="mt-4">
+            <div className="mb-2 flex items-center justify-between">
+              <p className="label">Actions <span className="text-red-500">*</span></p>
+              <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={addAction}><Plus size={13} /> Add action</button>
+            </div>
+            {actions.map((act, i) => (
+              <div key={i} className="mb-3 rounded-md border border-slate-200 bg-white p-3">
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <div>
+                    <label className="label text-xs">Action type</label>
+                    <select className="input mt-0.5" value={act.actionType} onChange={(e) => updateAction(i, { actionType: e.target.value as GovernanceRuleAction['actionType'] })}>
+                      {actionTypes.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
+                    </select>
+                  </div>
+                  {act.actionType === 'require_approval' && (
+                    <>
+                      <div>
+                        <label className="label text-xs">Approver role</label>
+                        <select className="input mt-0.5" value={act.target} onChange={(e) => updateAction(i, { target: e.target.value })}>
+                          <option value="approver">Approver</option>
+                          <option value="admin">Admin</option>
+                          <option value="room_data_editor">Room Data Editor</option>
+                          <option value="system_owner">System Owner</option>
+                        </select>
+                      </div>
+                      <div className="sm:col-span-2">
+                        <label className="label text-xs">Label shown in workflow</label>
+                        <input className="input mt-0.5" placeholder="e.g. AV & Venues Team Lead" value={act.label} onChange={(e) => updateAction(i, { label: e.target.value })} />
+                      </div>
+                    </>
+                  )}
+                  {act.actionType === 'notify_system' && (
+                    <div>
+                      <label className="label text-xs">System</label>
+                      <select className="input mt-0.5" value={act.target} onChange={(e) => updateAction(i, { target: e.target.value })}>
+                        <option value="">— select —</option>
+                        {systems.map((s) => <option key={s.id} value={s.code}>{s.name}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {act.actionType === 'set_risk' && (
+                    <div>
+                      <label className="label text-xs">Risk level</label>
+                      <select className="input mt-0.5" value={act.riskLevel} onChange={(e) => updateAction(i, { riskLevel: e.target.value })}>
+                        {govRiskOptions.map((r) => <option key={r} value={r}>{r.charAt(0).toUpperCase() + r.slice(1)}</option>)}
+                      </select>
+                    </div>
+                  )}
+                  {act.actionType === 'flag_for_review' && (
+                    <div>
+                      <label className="label text-xs">Reason (shown in preview)</label>
+                      <input className="input mt-0.5" placeholder="e.g. Pattern changes affect all booking systems" value={act.reason} onChange={(e) => updateAction(i, { reason: e.target.value })} />
+                    </div>
+                  )}
+                </div>
+                {actions.length > 1 && (
+                  <button type="button" className="mt-2 text-xs text-slate-400 hover:text-red-500" onClick={() => removeAction(i)}>Remove action</button>
+                )}
+              </div>
+            ))}
+          </div>
+
+          <div className="mt-4 flex gap-2">
+            <button type="button" className="btn-primary" disabled={!ruleName.trim() || saving} onClick={() => void handleSave()}>{saving ? 'Saving…' : 'Create rule'}</button>
+            <button type="button" className="btn-secondary" onClick={() => { setShowForm(false); resetForm(); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!rules.length && !showForm && (
+        <EmptyState icon={GitBranch} title="No governance rules configured" description={canManage ? 'Click "New rule" to create one, or run the governance seed migration.' : 'No rules have been configured yet.'} />
+      )}
+
+      <div className="grid gap-3">
+        {rules.map((rule) => (
+          <div key={rule.id} className={cn('rounded-lg border bg-white', rule.isActive ? 'border-slate-200' : 'border-slate-100 opacity-60')}>
+            <div
+              className="flex cursor-pointer flex-col gap-2 p-4 sm:flex-row sm:items-center sm:justify-between"
+              onClick={() => setExpanded(expanded === rule.id ? null : rule.id)}
+            >
+              <div className="flex flex-wrap items-center gap-2">
+                {expanded === rule.id ? <ChevronDown size={16} className="shrink-0 text-slate-400" /> : <ChevronRight size={16} className="shrink-0 text-slate-400" />}
+                <p className="font-semibold text-slate-900">{rule.name}</p>
+                <span className={cn('badge text-xs', riskBadge(rule.riskLevel))}>{rule.riskLevel}</span>
+                {!rule.isActive && <span className="badge border-slate-200 bg-slate-100 text-slate-500 text-xs">Inactive</span>}
+              </div>
+              <div className="flex items-center gap-2 pl-6 sm:pl-0">
+                <span className="text-xs text-slate-400">{getRtName(rule.requestTypeId)}</span>
+                {canManage && (
+                  <>
+                    <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={(e) => { e.stopPropagation(); void handleToggle(rule); }}>
+                      {rule.isActive ? 'Disable' : 'Enable'}
+                    </button>
+                    <button type="button" className="btn-secondary px-2 py-1 text-xs text-red-600 hover:border-red-300 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); void handleDelete(rule.id); }} disabled={deleting === rule.id}>
+                      <Trash2 size={14} />
+                    </button>
+                  </>
+                )}
+              </div>
+            </div>
+            {expanded === rule.id && (
+              <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+                {rule.description && <p className="mb-3 text-sm text-slate-600">{rule.description}</p>}
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div>
+                    <p className="label mb-2">Conditions {rule.conditions.length === 0 && <span className="font-normal text-slate-400">(always fires)</span>}</p>
+                    {rule.conditions.length > 0 ? (
+                      <ul className="space-y-1 text-sm text-slate-700">
+                        {rule.conditions.map((c) => (
+                          <li key={c.id} className="flex items-center gap-1">
+                            <span className="rounded bg-slate-100 px-1 font-mono text-xs">{c.attributeKey}</span>
+                            <span className="text-slate-400">{c.operator.replace(/_/g, ' ')}</span>
+                            {c.value && <span className="rounded bg-slate-100 px-1 font-mono text-xs">{c.value}</span>}
+                          </li>
+                        ))}
+                      </ul>
+                    ) : (
+                      <p className="text-sm text-slate-400">No attribute conditions — fires for all matching request types.</p>
+                    )}
+                  </div>
+                  <div>
+                    <p className="label mb-2">Actions</p>
+                    <ul className="space-y-1 text-sm text-slate-700">
+                      {rule.actions.map((a) => (
+                        <li key={a.id} className="flex items-center gap-2">
+                          <span className="size-1.5 shrink-0 rounded-full bg-ecu-teal" />
+                          {getActionLabel(a)}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function GovernanceTemplatesTab({
+  templates,
+  setTemplates,
+  requestTypes,
+  systems,
+  requireAuthenticatedEdit,
+  canManage,
+  setError,
+}: {
+  templates: GovernanceTemplate[];
+  setTemplates: (value: GovernanceTemplate[]) => void;
+  requestTypes: GovernanceRequestType[];
+  systems: GovernanceSystem[];
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  canManage: boolean;
+  setError: (msg: string) => void;
+}) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [showNewTemplateForm, setShowNewTemplateForm] = useState(false);
+  const [newTemplateName, setNewTemplateName] = useState('');
+  const [newTemplateDesc, setNewTemplateDesc] = useState('');
+  const [newTemplateRtId, setNewTemplateRtId] = useState('');
+  const [creatingTemplate, setCreatingTemplate] = useState(false);
+  const [showNewTaskForm, setShowNewTaskForm] = useState<string | null>(null);
+  const [newTaskTitle, setNewTaskTitle] = useState('');
+  const [newTaskTeam, setNewTaskTeam] = useState('');
+  const [newTaskDays, setNewTaskDays] = useState(2);
+  const [newTaskInstructions, setNewTaskInstructions] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const getRtName = (id?: string) => requestTypes.find((rt) => rt.id === id)?.name;
+
+  const handleCreateTemplate = async () => {
+    if (!requireAuthenticatedEdit('create templates') || !newTemplateName.trim()) return;
+    setCreatingTemplate(true);
+    try {
+      const id = await saveGovernanceTemplate({ id: '', name: newTemplateName.trim(), description: newTemplateDesc.trim() || undefined, requestTypeId: newTemplateRtId || undefined, isActive: true });
+      setTemplates([...templates, { id, name: newTemplateName.trim(), description: newTemplateDesc.trim() || undefined, requestTypeId: newTemplateRtId || undefined, isActive: true, tasks: [] }]);
+      setNewTemplateName(''); setNewTemplateDesc(''); setNewTemplateRtId(''); setShowNewTemplateForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not create template.');
+    } finally {
+      setCreatingTemplate(false);
+    }
+  };
+
+  const handleDeleteTemplate = async (templateId: string, templateName: string) => {
+    if (!requireAuthenticatedEdit('delete templates')) return;
+    if (!confirm(`Delete template "${templateName}" and all its tasks?`)) return;
+    try {
+      await deleteGovernanceTemplate(templateId);
+      setTemplates(templates.filter((t) => t.id !== templateId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete template.');
+    }
+  };
+
+  const handleAddTask = async (templateId: string) => {
+    if (!requireAuthenticatedEdit('add template tasks')) return;
+    if (!newTaskTitle.trim() || !newTaskTeam.trim()) return;
+    setSaving(true);
+    try {
+      const template = templates.find((t) => t.id === templateId);
+      const sortOrder = (template?.tasks.length ?? 0) * 10 + 10;
+      const savedId = await saveTemplateTask({
+        templateId,
+        title: newTaskTitle.trim(),
+        ownerTeam: newTaskTeam.trim(),
+        estimatedDays: newTaskDays,
+        instructions: newTaskInstructions.trim() || undefined,
+        sortOrder,
+      });
+      setTemplates(templates.map((t) => t.id === templateId
+        ? {
+            ...t,
+            tasks: [...t.tasks, {
+              id: savedId,
+              templateId,
+              title: newTaskTitle.trim(),
+              ownerTeam: newTaskTeam.trim(),
+              estimatedDays: newTaskDays,
+              instructions: newTaskInstructions.trim() || undefined,
+              sortOrder,
+            }],
+          }
+        : t));
+      setNewTaskTitle('');
+      setNewTaskTeam('');
+      setNewTaskDays(2);
+      setNewTaskInstructions('');
+      setShowNewTaskForm(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save task.');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleDeleteTask = async (templateId: string, taskId: string) => {
+    if (!requireAuthenticatedEdit('delete template tasks')) return;
+    try {
+      await deleteTemplateTask(taskId);
+      setTemplates(templates.map((t) => t.id === templateId ? { ...t, tasks: t.tasks.filter((task) => task.id !== taskId) } : t));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete task.');
+    }
+  };
+
+  return (
+    <div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <button type="button" className="btn-primary" onClick={() => { if (requireAuthenticatedEdit('create templates')) setShowNewTemplateForm(true); }}><Plus size={16} /> New template</button>
+        </div>
+      )}
+      {showNewTemplateForm && (
+        <div className="mb-6 rounded-lg border border-ecu-teal/30 bg-slate-50 p-5">
+          <p className="mb-4 font-semibold text-slate-900">New implementation template</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="sm:col-span-2">
+              <label className="label">Template name <span className="text-red-500">*</span></label>
+              <input className="input mt-1" value={newTemplateName} onChange={(e) => setNewTemplateName(e.target.value)} placeholder="e.g. Booking Config Change — Standard" />
+            </div>
+            <div>
+              <label className="label">Linked request type</label>
+              <select className="input mt-1" value={newTemplateRtId} onChange={(e) => setNewTemplateRtId(e.target.value)}>
+                <option value="">None (applies to all)</option>
+                {requestTypes.map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Description</label>
+              <input className="input mt-1" value={newTemplateDesc} onChange={(e) => setNewTemplateDesc(e.target.value)} placeholder="Brief description" />
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button type="button" className="btn-primary" disabled={!newTemplateName.trim() || creatingTemplate} onClick={() => void handleCreateTemplate()}>{creatingTemplate ? 'Creating…' : 'Create template'}</button>
+            <button type="button" className="btn-secondary" onClick={() => { setShowNewTemplateForm(false); setNewTemplateName(''); setNewTemplateDesc(''); setNewTemplateRtId(''); }}>Cancel</button>
+          </div>
+        </div>
+      )}
+      {!templates.length && !showNewTemplateForm && (
+        <EmptyState icon={ListChecks} title="No implementation templates configured" description={canManage ? 'Click "New template" to create one, or run the governance seed migration.' : 'No templates have been configured yet.'} />
+      )}
+      <div className="grid gap-3">
+      {templates.map((template) => (
+        <div key={template.id} className="rounded-lg border border-slate-200 bg-white">
+          <div
+            className="flex cursor-pointer items-center justify-between gap-2 p-4"
+            onClick={() => setExpanded(expanded === template.id ? null : template.id)}
+          >
+            <div className="flex items-center gap-2">
+              {expanded === template.id ? <ChevronDown size={16} className="shrink-0 text-slate-400" /> : <ChevronRight size={16} className="shrink-0 text-slate-400" />}
+              <div>
+                <p className="font-semibold text-slate-900">{template.name}</p>
+                {getRtName(template.requestTypeId) && <p className="text-xs text-slate-400">{getRtName(template.requestTypeId)}</p>}
+              </div>
+            </div>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-slate-400">{template.tasks.length} task{template.tasks.length !== 1 ? 's' : ''}</span>
+              {canManage && (
+                <button type="button" className="btn-secondary px-2 py-1 text-xs text-red-600 hover:border-red-300 hover:bg-red-50" onClick={(e) => { e.stopPropagation(); void handleDeleteTemplate(template.id, template.name); }}><Trash2 size={13} /></button>
+              )}
+            </div>
+          </div>
+          {expanded === template.id && (
+            <div className="border-t border-slate-100 px-4 pb-4 pt-3">
+              {template.description && <p className="mb-3 text-sm text-slate-600">{template.description}</p>}
+              <div className="divide-y divide-slate-100 rounded-md border border-slate-200">
+                {template.tasks.map((task, idx) => (
+                  <div key={task.id} className="flex items-start justify-between gap-3 p-3">
+                    <div className="flex items-start gap-3">
+                      <span className="mt-0.5 flex size-6 shrink-0 items-center justify-center rounded-full bg-ecu-mint text-xs font-bold text-ecu-black">{idx + 1}</span>
+                      <div>
+                        <p className="text-sm font-semibold text-slate-900">{task.title}</p>
+                        <p className="text-xs text-slate-500">{task.ownerTeam} · {task.estimatedDays}d</p>
+                        {task.instructions && <p className="mt-1 text-xs leading-5 text-slate-600">{task.instructions}</p>}
+                      </div>
+                    </div>
+                    {canManage && (
+                      <button
+                        type="button"
+                        className="mt-0.5 shrink-0 text-slate-400 hover:text-red-500"
+                        onClick={() => void handleDeleteTask(template.id, task.id)}
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
+                ))}
+                {template.tasks.length === 0 && (
+                  <p className="p-3 text-sm text-slate-400">No tasks yet. Add one below.</p>
+                )}
+              </div>
+              {canManage && (
+                <div className="mt-3">
+                  {showNewTaskForm === template.id ? (
+                    <div className="rounded-md border border-ecu-teal/20 bg-slate-50 p-3">
+                      <p className="label mb-2">Add task</p>
+                      <div className="grid gap-2 sm:grid-cols-2">
+                        <input
+                          className="input col-span-2"
+                          placeholder="Task title"
+                          value={newTaskTitle}
+                          onChange={(e) => setNewTaskTitle(e.target.value)}
+                        />
+                        <input
+                          className="input"
+                          placeholder="Owner team"
+                          value={newTaskTeam}
+                          onChange={(e) => setNewTaskTeam(e.target.value)}
+                        />
+                        <div className="flex items-center gap-2">
+                          <input
+                            className="input w-20"
+                            type="number"
+                            min={1}
+                            value={newTaskDays}
+                            onChange={(e) => setNewTaskDays(Math.max(1, Number(e.target.value)))}
+                          />
+                          <span className="text-sm text-slate-500">days</span>
+                        </div>
+                        <textarea
+                          className="input col-span-2 h-20 resize-none"
+                          placeholder="Instructions (optional)"
+                          value={newTaskInstructions}
+                          onChange={(e) => setNewTaskInstructions(e.target.value)}
+                        />
+                      </div>
+                      <div className="mt-2 flex gap-2">
+                        <button
+                          type="button"
+                          className="btn-primary"
+                          disabled={!newTaskTitle.trim() || !newTaskTeam.trim() || saving}
+                          onClick={() => void handleAddTask(template.id)}
+                        >
+                          {saving ? 'Saving…' : 'Add task'}
+                        </button>
+                        <button
+                          type="button"
+                          className="btn-secondary"
+                          onClick={() => { setShowNewTaskForm(null); setNewTaskTitle(''); setNewTaskTeam(''); setNewTaskInstructions(''); }}
+                        >
+                          Cancel
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <button
+                      type="button"
+                      className="btn-secondary text-sm"
+                      onClick={() => setShowNewTaskForm(template.id)}
+                    >
+                      <Plus size={15} /> Add task
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      ))}
+      </div>
+    </div>
+  );
+}
+
+const govSystemTypes = ['booking', 'timetabling', 'facilities', 'access', 'signage', 'asset', 'specialist', 'integration'];
+
+function GovernanceSystemsTab({
+  systems,
+  setSystems,
+  requireAuthenticatedEdit,
+  canManage,
+  setError,
+}: {
+  systems: GovernanceSystem[];
+  setSystems: (value: GovernanceSystem[]) => void;
+  requireAuthenticatedEdit: (action?: string) => boolean;
+  canManage: boolean;
+  setError: (msg: string) => void;
+}) {
+  const [showForm, setShowForm] = useState(false);
+  const [editId, setEditId] = useState<string | null>(null);
+  const [form, setForm] = useState({ code: '', name: '', description: '', ownerTeam: '', systemType: 'integration', isActive: true, sortOrder: 100 });
+  const [saving, setSaving] = useState(false);
+
+  const openNew = () => {
+    if (!requireAuthenticatedEdit('add systems')) return;
+    setEditId(null);
+    setForm({ code: '', name: '', description: '', ownerTeam: '', systemType: 'integration', isActive: true, sortOrder: (systems.length + 1) * 10 });
+    setShowForm(true);
+  };
+  const openEdit = (s: GovernanceSystem) => {
+    if (!requireAuthenticatedEdit('edit systems')) return;
+    setEditId(s.id);
+    setForm({ code: s.code, name: s.name, description: s.description ?? '', ownerTeam: s.ownerTeam, systemType: s.systemType, isActive: s.isActive, sortOrder: s.sortOrder });
+    setShowForm(true);
+  };
+  const handleSave = async () => {
+    if (!form.code.trim() || !form.name.trim()) return;
+    setSaving(true);
+    try {
+      const saved = await saveGovernanceSystem({ ...(editId ? { id: editId } : {}), ...form });
+      const updated: GovernanceSystem = { id: editId ?? saved, ...form };
+      setSystems(editId ? systems.map((s) => s.id === editId ? updated : s) : [...systems, updated]);
+      setShowForm(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not save system.');
+    } finally {
+      setSaving(false);
+    }
+  };
+  const handleDelete = async (system: GovernanceSystem) => {
+    if (!requireAuthenticatedEdit('delete systems')) return;
+    if (!confirm(`Delete "${system.name}"?`)) return;
+    try {
+      await deleteGovernanceSystem(system.id);
+      setSystems(systems.filter((s) => s.id !== system.id));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not delete system.');
+    }
+  };
+
+  const typeColour = (type: string) => {
+    const map: Record<string, string> = {
+      booking: 'border-blue-200 bg-blue-50 text-blue-700',
+      timetabling: 'border-violet-200 bg-violet-50 text-violet-700',
+      facilities: 'border-amber-200 bg-amber-50 text-amber-700',
+      access: 'border-red-200 bg-red-50 text-red-700',
+      signage: 'border-emerald-200 bg-emerald-50 text-emerald-700',
+      asset: 'border-slate-200 bg-slate-50 text-slate-700',
+      specialist: 'border-teal-200 bg-teal-50 text-teal-700',
+    };
+    return map[type] ?? 'border-slate-200 bg-slate-50 text-slate-600';
+  };
+
+  return (
+    <div>
+      {canManage && (
+        <div className="mb-4 flex justify-end">
+          <button type="button" className="btn-primary" onClick={openNew}><Plus size={16} /> New system</button>
+        </div>
+      )}
+
+      {showForm && (
+        <div className="mb-6 rounded-lg border border-ecu-teal/30 bg-slate-50 p-5">
+          <p className="mb-4 font-semibold text-slate-900">{editId ? 'Edit system' : 'New downstream system'}</p>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div>
+              <label className="label">Code <span className="text-red-500">*</span></label>
+              <input className="input mt-1 font-mono uppercase" value={form.code} onChange={(e) => setForm({ ...form, code: e.target.value.toUpperCase() })} placeholder="e.g. O365" disabled={!!editId} />
+            </div>
+            <div>
+              <label className="label">Display name <span className="text-red-500">*</span></label>
+              <input className="input mt-1" value={form.name} onChange={(e) => setForm({ ...form, name: e.target.value })} placeholder="e.g. Microsoft 365 / Exchange" />
+            </div>
+            <div className="sm:col-span-2">
+              <label className="label">Description</label>
+              <input className="input mt-1" value={form.description} onChange={(e) => setForm({ ...form, description: e.target.value })} placeholder="What does this system do?" />
+            </div>
+            <div>
+              <label className="label">Owner team</label>
+              <input className="input mt-1" value={form.ownerTeam} onChange={(e) => setForm({ ...form, ownerTeam: e.target.value })} placeholder="e.g. Digital Services" />
+            </div>
+            <div>
+              <label className="label">System type</label>
+              <select className="input mt-1" value={form.systemType} onChange={(e) => setForm({ ...form, systemType: e.target.value })}>
+                {govSystemTypes.map((t) => <option key={t} value={t}>{t.charAt(0).toUpperCase() + t.slice(1)}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button type="button" className="btn-primary" disabled={!form.code.trim() || !form.name.trim() || saving} onClick={() => void handleSave()}>{saving ? 'Saving…' : editId ? 'Save changes' : 'Create'}</button>
+            <button type="button" className="btn-secondary" onClick={() => setShowForm(false)}>Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {!systems.length && !showForm && (
+        <EmptyState icon={Database} title="No downstream systems configured" description={canManage ? 'Click "New system" to add one, or run the governance seed migration.' : 'No systems have been configured yet.'} />
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        {systems.map((system) => (
+          <div key={system.id} className="rounded-lg border border-slate-200 bg-white p-4">
+            <div className="flex items-start justify-between gap-2">
+              <div>
+                <p className="font-semibold text-slate-900">{system.name}</p>
+                <p className="font-mono text-xs text-slate-400">{system.code}</p>
+              </div>
+              <span className={cn('badge text-xs', typeColour(system.systemType))}>{system.systemType}</span>
+            </div>
+            {system.description && <p className="mt-2 text-sm text-slate-500">{system.description}</p>}
+            <p className="mt-2 text-xs text-slate-400">Owner: {system.ownerTeam}</p>
+            {canManage && (
+              <div className="mt-3 flex gap-2 border-t border-slate-100 pt-3">
+                <button type="button" className="btn-secondary px-2 py-1 text-xs" onClick={() => openEdit(system)}><Pencil size={13} /> Edit</button>
+                <button type="button" className="btn-secondary px-2 py-1 text-xs text-red-600 hover:border-red-300 hover:bg-red-50" onClick={() => void handleDelete(system)}><Trash2 size={13} /></button>
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -6475,13 +7543,88 @@ function Governance({
   requests,
   setRequests,
   rooms,
+  requestTypes,
+  rules,
+  systems,
+  templates,
   requireAuthenticatedEdit,
 }: {
   requests: ChangeRequest[];
   setRequests: (requests: ChangeRequest[]) => void;
   rooms: Room[];
+  requestTypes: GovernanceRequestType[];
+  rules: GovernanceRule[];
+  systems: GovernanceSystem[];
+  templates: GovernanceTemplate[];
   requireAuthenticatedEdit: (action?: string) => boolean;
 }) {
+  type GovernanceTab = 'requests' | 'preview';
+  const [tab, setTab] = useState<GovernanceTab>('requests');
+
+  // New change request form state
+  const [showNewRequest, setShowNewRequest] = useState(false);
+  const [crTitle, setCrTitle] = useState('');
+  const [crRequestTypeId, setCrRequestTypeId] = useState('');
+  const [crReason, setCrReason] = useState('');
+  const [crRoomQuery, setCrRoomQuery] = useState('');
+  const [crRoomId, setCrRoomId] = useState('');
+  const [crSaving, setCrSaving] = useState(false);
+  const [crError, setCrError] = useState('');
+
+  const crRoomMatches = crRoomQuery.trim().length >= 2
+    ? rooms.filter((r) => {
+        const q = crRoomQuery.toLowerCase();
+        return r.roomCode.toLowerCase().includes(q) || r.name.toLowerCase().includes(q);
+      }).slice(0, 8)
+    : [];
+
+  const selectedCrRoom = rooms.find((r) => r.id === crRoomId);
+  const selectedCrRequestType = requestTypes.find((rt) => rt.id === crRequestTypeId);
+
+  const handleSaveRequest = async () => {
+    if (!requireAuthenticatedEdit('submit change requests')) return;
+    if (!crTitle.trim() || !crRequestTypeId) return;
+    setCrSaving(true);
+    setCrError('');
+    try {
+      const evalResult = evaluateGovernanceRules({ requestTypeId: crRequestTypeId }, rules);
+      const newRequest: Omit<ChangeRequest, 'id'> = {
+        title: crTitle.trim(),
+        requestType: selectedCrRequestType?.name ?? '',
+        roomId: crRoomId || undefined,
+        reason: crReason.trim(),
+        status: 'Submitted',
+        requestedBy: 'Current User',
+        impactedSystems: evalResult.impactedSystems,
+        risk: evalResult.riskLevel === 'standard' ? 'standard' : 'high',
+        approvers: evalResult.requiredApprovals.map((a) => ({ role: a.label as ChangeRequest['approvers'][0]['role'], decision: 'Pending' })),
+        tasks: [],
+        history: [`Submitted — ${new Date().toLocaleDateString()}`],
+      };
+      const savedId = await saveChangeRequest(newRequest);
+      setRequests([...requests, { ...newRequest, id: savedId }]);
+      setCrTitle(''); setCrRequestTypeId(''); setCrReason(''); setCrRoomId(''); setCrRoomQuery('');
+      setShowNewRequest(false);
+    } catch (err) {
+      setCrError(err instanceof Error ? err.message : 'Could not save change request.');
+    } finally {
+      setCrSaving(false);
+    }
+  };
+
+  // Rule preview state
+  const [previewRequestTypeId, setPreviewRequestTypeId] = useState('');
+  const [previewResult, setPreviewResult] = useState<RuleEvaluationResult | null>(null);
+
+  const runPreview = () => {
+    if (!previewRequestTypeId) return;
+    const result = evaluateGovernanceRules(
+      { requestTypeId: previewRequestTypeId },
+      rules,
+    );
+    setPreviewResult(result);
+  };
+
   const updateRequestStatus = (id: string, status: ChangeRequest['status']) => {
     if (!requireAuthenticatedEdit('update governance requests')) return;
     setRequests(requests.map((request) => {
@@ -6505,63 +7648,274 @@ function Governance({
       : request));
   };
 
+  const getSystemName = (code: string) => systems.find((s) => s.code === code)?.name ?? code;
+
   return (
     <>
       <PageHeader title="Governance Workflow" description="Workflow engine for request intake, multi-stage approvals, generated operational action lists, manual completion, runbook references, and audit history." />
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {['Under Review', 'Awaiting Information', 'Ready for Implementation', 'Implemented', 'Verified'].map((status) => (
+
+      <section className="mb-6 grid gap-4 md:grid-cols-2 xl:grid-cols-5">
+        {(['Under Review', 'Awaiting Information', 'Ready for Implementation', 'Implemented', 'Verified'] as ChangeRequest['status'][]).map((status) => (
           <MetricCard key={status} icon={ClipboardCheck} label={status} value={requests.filter((request) => request.status === status).length} detail="Governed change requests" />
         ))}
       </section>
-      <div className="mt-6 grid gap-6">
-        {requests.map((request) => {
-          const room = rooms.find((item) => item.id === request.roomId);
-          return (
-            <div key={request.id} className="panel rounded-lg p-4">
-              <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+
+      <div className="mb-6 flex gap-2 border-b border-slate-200">
+        {([['requests', 'Change Requests'], ['preview', 'Rule Preview']] as [GovernanceTab, string][]).map(([t, label]) => (
+          <button
+            key={t}
+            type="button"
+            onClick={() => setTab(t)}
+            className={cn(
+              '-mb-px border-b-2 px-4 py-2 text-sm font-semibold transition',
+              tab === t ? 'border-ecu-teal text-ecu-teal' : 'border-transparent text-slate-500 hover:text-slate-800',
+            )}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'requests' && (
+        <div className="grid gap-6">
+          <div className="flex justify-end">
+            <button type="button" className="btn-primary" onClick={() => { if (requireAuthenticatedEdit('submit change requests')) setShowNewRequest(true); }}>
+              <Plus size={16} /> New change request
+            </button>
+          </div>
+
+          {showNewRequest && (
+            <div className="rounded-lg border border-ecu-teal/30 bg-slate-50 p-5">
+              <p className="mb-4 font-semibold text-slate-900">New change request</p>
+              {crError && <ErrorMessage message={crError} onClose={() => setCrError('')} />}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="sm:col-span-2">
+                  <label className="label">Title <span className="text-red-500">*</span></label>
+                  <input className="input mt-1" value={crTitle} onChange={(e) => setCrTitle(e.target.value)} placeholder="Brief summary of the change" />
+                </div>
                 <div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h3 className="text-lg font-bold text-slate-950">{request.id} · {request.title}</h3>
-                    <StatusBadge status={request.status} />
-                    <StatusBadge status={request.risk === 'high' ? 'High risk' : 'Standard risk'} />
-                  </div>
-                  <p className="mt-1 text-sm text-slate-600">{room ? roomDisplayName(room) : 'No room linked'} · {request.requestType}</p>
-                  <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-700">{request.reason}</p>
+                  <label className="label">Request type <span className="text-red-500">*</span></label>
+                  <select className="input mt-1" value={crRequestTypeId} onChange={(e) => setCrRequestTypeId(e.target.value)}>
+                    <option value="">— select —</option>
+                    {requestTypes.map((rt) => <option key={rt.id} value={rt.id}>{rt.name}</option>)}
+                  </select>
                 </div>
-                <div className="flex flex-wrap gap-2">
-                  <button className="btn-secondary" onClick={() => updateRequestStatus(request.id, 'Approved')}><CheckCircle2 size={16} /> Approve</button>
-                  <button className="btn-secondary" onClick={() => updateRequestStatus(request.id, 'Rejected')}><AlertTriangle size={16} /> Reject</button>
-                </div>
-              </div>
-              <div className="mt-4 grid gap-4 xl:grid-cols-3">
-                <MiniList title="Impacted systems" items={request.impactedSystems} />
-                <MiniList title="Approvals" items={request.approvers.map((approver) => `${approver.role}: ${approver.decision}${approver.comments ? ` - ${approver.comments}` : ''}`)} />
-                <MiniList title="Audit history" items={request.history} />
-              </div>
-              <div className="mt-4 rounded-md border border-slate-200">
-                <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
-                  <p className="font-semibold text-slate-900">Generated implementation checklist</p>
-                </div>
-                <div className="divide-y divide-slate-200">
-                  {request.tasks.length ? request.tasks.map((task) => (
-                    <div key={task.id} className="grid gap-3 p-4 md:grid-cols-[1fr_160px_180px_160px] md:items-center">
-                      <div>
-                        <p className="font-semibold text-slate-900">{task.title}</p>
-                        <p className="text-sm text-slate-600">{task.system} · {task.ownerTeam} · due {task.dueDate}</p>
+                <div>
+                  <label className="label">Room {selectedCrRequestType?.requiresRoom === false ? '' : ''}</label>
+                  <div className="relative mt-1">
+                    {selectedCrRoom ? (
+                      <div className="flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm">
+                        <span className="flex-1 text-slate-900">{roomDisplayName(selectedCrRoom)}</span>
+                        <button type="button" className="text-slate-400 hover:text-slate-700" onClick={() => { setCrRoomId(''); setCrRoomQuery(''); }}>×</button>
                       </div>
-                      <StatusBadge status={task.status} />
-                      <select className="input" value={task.status} onChange={(event) => completeTask(request.id, task.id, event.target.value as TaskStatus)}>
-                        {['Not Started', 'In Progress', 'Blocked', 'Completed', 'Verified'].map((status) => <option key={status}>{status}</option>)}
-                      </select>
-                      <span className="text-sm text-slate-500">{task.dependency ? `Depends on ${task.dependency}` : 'No dependency'}</span>
-                    </div>
-                  )) : <p className="p-4 text-sm text-slate-600">Tasks will generate after approval based on request type, room pattern, and impacted systems.</p>}
+                    ) : (
+                      <input className="input" placeholder="Search room code or name…" value={crRoomQuery} onChange={(e) => { setCrRoomQuery(e.target.value); setCrRoomId(''); }} />
+                    )}
+                    {crRoomMatches.length > 0 && !crRoomId && (
+                      <div className="absolute z-10 mt-1 w-full rounded-md border border-slate-200 bg-white shadow-lg">
+                        {crRoomMatches.map((r) => (
+                          <button key={r.id} type="button" className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-slate-50" onClick={() => { setCrRoomId(r.id); setCrRoomQuery(''); }}>
+                            <span className="font-mono text-xs text-slate-400">{r.roomCode}</span>
+                            <span className="text-slate-700">{getRoomFinalName(r)}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
+                <div className="sm:col-span-2">
+                  <label className="label">Reason / justification</label>
+                  <textarea className="input mt-1 h-24 resize-none" value={crReason} onChange={(e) => setCrReason(e.target.value)} placeholder="Why is this change needed?" />
+                </div>
+              </div>
+              {crRequestTypeId && (
+                <div className="mt-3 rounded-md border border-slate-200 bg-white p-3 text-sm">
+                  {(() => {
+                    const preview = evaluateGovernanceRules({ requestTypeId: crRequestTypeId }, rules);
+                    return (
+                      <div className="flex flex-wrap gap-4">
+                        <span className={cn('font-semibold', preview.riskLevel === 'critical' ? 'text-red-600' : preview.riskLevel === 'high' ? 'text-amber-600' : 'text-emerald-600')}>
+                          {preview.riskLevel.charAt(0).toUpperCase() + preview.riskLevel.slice(1)} risk
+                        </span>
+                        {preview.requiredApprovals.length > 0 && (
+                          <span className="text-slate-600">{preview.requiredApprovals.length} approval stage{preview.requiredApprovals.length !== 1 ? 's' : ''} required</span>
+                        )}
+                        {preview.impactedSystems.length > 0 && (
+                          <span className="text-slate-600">Systems: {preview.impactedSystems.join(', ')}</span>
+                        )}
+                        {preview.matchedRules.length === 0 && (
+                          <span className="text-slate-400">No governance rules matched — will proceed with no required approvals.</span>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              <div className="mt-4 flex gap-2">
+                <button type="button" className="btn-primary" disabled={!crTitle.trim() || !crRequestTypeId || crSaving} onClick={() => void handleSaveRequest()}>
+                  {crSaving ? 'Submitting…' : 'Submit request'}
+                </button>
+                <button type="button" className="btn-secondary" onClick={() => { setShowNewRequest(false); setCrTitle(''); setCrRequestTypeId(''); setCrReason(''); setCrRoomId(''); setCrRoomQuery(''); }}>Cancel</button>
               </div>
             </div>
-          );
-        })}
-      </div>
+          )}
+
+          {requests.length === 0 && !showNewRequest && (
+            <EmptyState icon={ClipboardCheck} title="No change requests" description="Click 'New change request' to submit one through the governed workflow." />
+          )}
+          {requests.map((request) => {
+            const room = rooms.find((item) => item.id === request.roomId);
+            return (
+              <div key={request.id} className="panel rounded-lg p-4">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-lg font-bold text-slate-950">{request.id} · {request.title}</h3>
+                      <StatusBadge status={request.status} />
+                      <StatusBadge status={request.risk === 'high' ? 'High risk' : 'Standard risk'} />
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600">{room ? roomDisplayName(room) : 'No room linked'} · {request.requestType}</p>
+                    <p className="mt-3 max-w-4xl text-sm leading-6 text-slate-700">{request.reason}</p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button className="btn-secondary" onClick={() => updateRequestStatus(request.id, 'Approved')}><CheckCircle2 size={16} /> Approve</button>
+                    <button className="btn-secondary" onClick={() => updateRequestStatus(request.id, 'Rejected')}><AlertTriangle size={16} /> Reject</button>
+                  </div>
+                </div>
+                <div className="mt-4 grid gap-4 xl:grid-cols-3">
+                  <MiniList title="Impacted systems" items={request.impactedSystems.map(getSystemName)} />
+                  <MiniList title="Approvals" items={request.approvers.map((approver) => `${approver.role}: ${approver.decision}${approver.comments ? ` - ${approver.comments}` : ''}`)} />
+                  <MiniList title="Audit history" items={request.history} />
+                </div>
+                <div className="mt-4 rounded-md border border-slate-200">
+                  <div className="border-b border-slate-200 bg-slate-50 px-4 py-3">
+                    <p className="font-semibold text-slate-900">Generated implementation checklist</p>
+                  </div>
+                  <div className="divide-y divide-slate-200">
+                    {request.tasks.length ? request.tasks.map((task) => (
+                      <div key={task.id} className="grid gap-3 p-4 md:grid-cols-[1fr_160px_180px_160px] md:items-center">
+                        <div>
+                          <p className="font-semibold text-slate-900">{task.title}</p>
+                          <p className="text-sm text-slate-600">{task.system} · {task.ownerTeam} · due {task.dueDate}</p>
+                        </div>
+                        <StatusBadge status={task.status} />
+                        <select className="input" value={task.status} onChange={(event) => completeTask(request.id, task.id, event.target.value as TaskStatus)}>
+                          {['Not Started', 'In Progress', 'Blocked', 'Completed', 'Verified'].map((status) => <option key={status}>{status}</option>)}
+                        </select>
+                        <span className="text-sm text-slate-500">{task.dependency ? `Depends on ${task.dependency}` : 'No dependency'}</span>
+                      </div>
+                    )) : <p className="p-4 text-sm text-slate-600">Tasks will generate after approval based on request type, room pattern, and impacted systems.</p>}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'preview' && (
+        <div className="grid gap-6 lg:grid-cols-[1fr_1.5fr]">
+          <div className="rounded-lg border border-slate-200 bg-white p-5">
+            <h3 className="mb-4 font-semibold text-slate-900">Rule evaluation preview</h3>
+            <p className="mb-3 text-sm text-slate-600">
+              Select a request type to see which governance rules would fire and what approvals, systems, and templates they would generate.
+            </p>
+            <label className="block">
+              <span className="label">Request type</span>
+              <select className="input mt-1" value={previewRequestTypeId} onChange={(e) => { setPreviewRequestTypeId(e.target.value); setPreviewResult(null); }}>
+                <option value="">Select a request type…</option>
+                {requestTypes.map((rt) => (
+                  <option key={rt.id} value={rt.id}>{rt.name}</option>
+                ))}
+              </select>
+            </label>
+            <button
+              type="button"
+              className="btn-primary mt-4 w-full"
+              disabled={!previewRequestTypeId}
+              onClick={runPreview}
+            >
+              <GitBranch size={16} /> Evaluate rules
+            </button>
+            {rules.length === 0 && (
+              <p className="mt-3 text-xs text-amber-600">No governance rules loaded. Run the seed migration or configure rules in the Rules admin page.</p>
+            )}
+          </div>
+
+          <div>
+            {previewResult ? (
+              <div className="grid gap-4">
+                <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                  <div>
+                    <p className="label">Risk level</p>
+                    <p className={cn('mt-1 font-semibold', previewResult.riskLevel === 'critical' ? 'text-red-600' : previewResult.riskLevel === 'high' ? 'text-amber-600' : 'text-emerald-600')}>
+                      {previewResult.riskLevel.charAt(0).toUpperCase() + previewResult.riskLevel.slice(1)}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="label">Rules matched</p>
+                    <p className="mt-1 font-semibold text-slate-900">{previewResult.matchedRules.length}</p>
+                  </div>
+                  {previewResult.flaggedForReview && (
+                    <span className="badge border-amber-200 bg-amber-50 text-amber-700">Flagged for review</span>
+                  )}
+                </div>
+
+                {previewResult.matchedRules.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="label mb-2">Matched rules</p>
+                    <ul className="space-y-1">
+                      {previewResult.matchedRules.map((r) => (
+                        <li key={r.id} className="flex items-center gap-2 text-sm text-slate-700">
+                          <span className="size-1.5 shrink-0 rounded-full bg-ecu-teal" />
+                          {r.name}
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+
+                {previewResult.requiredApprovals.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="label mb-2">Required approval stages</p>
+                    <div className="flex flex-wrap gap-2">
+                      {previewResult.requiredApprovals.map((a) => (
+                        <div key={a.stage} className="flex items-center gap-2 rounded-md border border-slate-200 px-3 py-2 text-sm">
+                          <span className="flex size-5 items-center justify-center rounded-full bg-ecu-teal text-xs font-bold text-white">{a.stage}</span>
+                          {a.label}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {previewResult.impactedSystems.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4">
+                    <p className="label mb-2">Impacted systems</p>
+                    <div className="flex flex-wrap gap-2">
+                      {previewResult.impactedSystems.map((code) => (
+                        <div key={code} className="rounded-md border border-blue-200 bg-blue-50 px-3 py-1 text-sm text-blue-700">
+                          {getSystemName(code)}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {previewResult.matchedRules.length === 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-white p-4 text-sm text-slate-500">
+                    No governance rules match this request type. The request would proceed without required approvals.
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex h-full min-h-[200px] items-center justify-center rounded-lg border border-dashed border-slate-200 bg-white p-8 text-center text-sm text-slate-400">
+                Select a request type and click "Evaluate rules" to see the governance preview.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </>
   );
 }
