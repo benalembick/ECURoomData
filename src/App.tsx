@@ -7574,7 +7574,8 @@ function Governance({
   const crRoomMatches = crRoomQuery.trim().length >= 2
     ? rooms.filter((r) => {
         const q = crRoomQuery.toLowerCase();
-        return r.roomCode.toLowerCase().includes(q) || r.name.toLowerCase().includes(q);
+        const finalName = getRoomFinalName(r).toLowerCase();
+        return r.roomCode.toLowerCase().includes(q) || r.name.toLowerCase().includes(q) || finalName.includes(q);
       }).slice(0, 8)
     : [];
 
@@ -7770,7 +7771,7 @@ function Governance({
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <h3 className="text-lg font-bold text-slate-950">{request.id} · {request.title}</h3>
+                      <h3 className="text-lg font-bold text-slate-950">{request.title}</h3>
                       <StatusBadge status={request.status} />
                       <StatusBadge status={request.risk === 'high' ? 'High risk' : 'Standard risk'} />
                     </div>
