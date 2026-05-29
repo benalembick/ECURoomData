@@ -29,6 +29,8 @@ for all to authenticated
 using (public.current_user_role() = 'admin')
 with check (public.current_user_role() = 'admin');
 
+-- IMPORTANT: When adding a table to this function, also add it to BACKUP_TABLES in server-backups.cjs.
+-- Both lists must stay in sync — server-backups.cjs will warn at startup if they diverge.
 create or replace function public.restore_room_data_backup(target_backup_id uuid, restoring_user_id uuid default null)
 returns void
 language plpgsql

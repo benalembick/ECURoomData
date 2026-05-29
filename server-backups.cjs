@@ -1,3 +1,6 @@
+// IMPORTANT: When adding a table here, also add it to restore_room_data_backup() in
+// supabase/migrations/202605200005_room_attribute_groups.sql (the most recent version of that function),
+// and keep RESTORE_TABLES below in sync. The startup check will warn if they diverge.
 const BACKUP_TABLES = [
   'campuses',
   'buildings',
@@ -18,6 +21,70 @@ const BACKUP_TABLES = [
   'room_change_log',
   'import_jobs',
 ];
+
+// Must mirror the INSERT order in restore_room_data_backup() in
+// supabase/migrations/202605200005_room_attribute_groups.sql.
+const RESTORE_TABLES = [
+  'campuses',
+  'buildings',
+  'floors',
+  'systems',
+  'room_categories',
+  'room_patterns',
+  'rooms',
+  'room_attribute_groups',
+  'room_attribute_definitions',
+  'room_attribute_values',
+  'system_mappings',
+  'transformation_rules',
+  'change_requests',
+  'approvals',
+  'implementation_templates',
+  'implementation_tasks',
+  'room_change_log',
+  'import_jobs',
+];
+
+// Tables in the public schema that are intentionally excluded from backups.
+// If a new table appears in the DB and is not in BACKUP_TABLES or here,
+// checkForUncoveredTables() will log a warning.
+const TABLES_NOT_BACKED_UP = new Set([
+  'roles',                          // static role config, not room data
+  'profiles',                       // user account data, not room data
+  'room_data_backup_sets',          // backup infrastructure
+  'room_data_backup_rows',          // backup infrastructure
+  'building_floorplans',            // floorplan image metadata — intentionally excluded
+  'building_floorplan_hotspots',    // floorplan room hotspots — intentionally excluded
+  'business_units',                 // issues register — intentionally excluded
+  'issue_categories',               // issues register — intentionally excluded
+  'issue_statuses',                 // issues register — intentionally excluded
+  'issues',                         // issues register — intentionally excluded
+  'issue_comments',                 // issues register — intentionally excluded
+  'issue_attachments_or_references', // issues register — intentionally excluded
+  'governance_request_types',       // governance config — intentionally excluded
+  'governance_systems',             // governance config — intentionally excluded
+  'governance_rules',               // governance config — intentionally excluded
+  'governance_rule_conditions',     // governance config — intentionally excluded
+  'governance_rule_actions',        // governance config — intentionally excluded
+  'governance_templates',           // governance config — intentionally excluded
+  'governance_template_tasks',      // governance config — intentionally excluded
+  'governance_pattern_config',      // governance config — intentionally excluded
+]);
+
+// Warn at startup if BACKUP_TABLES and RESTORE_TABLES have diverged.
+(function validateTableLists() {
+  const backupSet = new Set(BACKUP_TABLES);
+  const restoreSet = new Set(RESTORE_TABLES);
+  const missingFromRestore = BACKUP_TABLES.filter((t) => !restoreSet.has(t));
+  const missingFromBackup = RESTORE_TABLES.filter((t) => !backupSet.has(t));
+  if (missingFromRestore.length || missingFromBackup.length) {
+    console.warn('[backup] BACKUP_TABLES and RESTORE_TABLES are out of sync!');
+    if (missingFromRestore.length) console.warn('[backup]   In BACKUP_TABLES but not RESTORE_TABLES:', missingFromRestore.join(', '));
+    if (missingFromBackup.length) console.warn('[backup]   In RESTORE_TABLES but not BACKUP_TABLES:', missingFromBackup.join(', '));
+    console.warn('[backup]   Fix both server-backups.cjs and supabase/migrations/202605200005_room_attribute_groups.sql together.');
+  }
+})();
+
 const BACKUP_PAGE_SIZE = 1000;
 const BACKUP_CHUNK_SIZE = 500;
 const backupOperations = new Map();
@@ -94,10 +161,37 @@ async function handleBackupsApi(request, response, adminClient, options = {}) {
   }
 }
 
+async function checkForUncoveredTables(adminClient) {
+  try {
+    const { data, error } = await adminClient
+      .schema('information_schema')
+      .from('tables')
+      .select('table_name')
+      .eq('table_schema', 'public')
+      .eq('table_type', 'BASE TABLE');
+
+    if (error || !data) return;
+
+    const backed = new Set(BACKUP_TABLES);
+    const uncovered = data
+      .map((r) => r.table_name)
+      .filter((name) => !backed.has(name) && !TABLES_NOT_BACKED_UP.has(name))
+      .sort();
+
+    if (uncovered.length) {
+      console.warn('[backup] Tables in the database not covered by backups:', uncovered.join(', '));
+      console.warn('[backup]   Add them to BACKUP_TABLES (and the SQL restore function) or to TABLES_NOT_BACKED_UP if intentionally excluded.');
+    }
+  } catch {
+    // Non-fatal — don't block the backup if information_schema is inaccessible.
+  }
+}
+
 async function runBackupOperation(adminClient, currentAdminId, operation, title, description) {
   let backupSetId = null;
 
   try {
+    await checkForUncoveredTables(adminClient);
     const rowCounts = {};
     const { data: backupSet, error: backupError } = await adminClient
       .from('room_data_backup_sets')

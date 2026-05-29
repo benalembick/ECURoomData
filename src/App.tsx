@@ -3876,6 +3876,44 @@ function RoomHotspot({
   return <rect {...commonProps} x={x} y={y} width={width} height={height} rx={1.2} />;
 }
 
+function roomsToCsvRows(rooms: Room[], attributes: AttributeDefinition[]) {
+  const attrLabelByKey = new Map(attributes.map((a) => [a.key, a.label]));
+  const allAttrKeys = Array.from(new Set(rooms.flatMap((r) => Object.keys(r.attributes))));
+  return rooms.map((room) => {
+    const row: Record<string, string | number | boolean> = {
+      'Room Code': room.roomCode,
+      'Name': room.name,
+      'Campus': room.campus,
+      'Building': room.building,
+      'Floor': room.floor,
+      'Type': room.type,
+      'Category': room.category,
+      'Pattern': room.pattern,
+      'Capacity': room.capacity,
+      'Owner': room.owner,
+      'Booking Status': room.bookingStatus,
+      'Is Teaching': room.isTeaching,
+      'Is Bookable': room.isBookable,
+      'Is Student Accessible': room.isStudentAccessible,
+      'Is Staff Only': room.isStaffOnly,
+      'Is Specialist': room.isSpecialist,
+      'Is Archived': room.isArchived,
+      'Physical Notes': room.physicalNotes,
+      'Booking Notes': room.bookingNotes,
+      'Floorplan Image URL': room.floorplanImageUrl ?? '',
+      'Capabilities': room.capabilities.join('; '),
+      'Downstream Systems': room.downstreamSystems.join('; '),
+      'Quality Flags': room.qualityFlags.join('; '),
+    };
+    for (const key of allAttrKeys) {
+      const label = attrLabelByKey.get(key) ?? key;
+      const value = room.attributes[key];
+      row[label] = Array.isArray(value) ? value.join('; ') : value ?? '';
+    }
+    return row;
+  });
+}
+
 function RoomSearch({
   rooms,
   campuses,
@@ -3973,7 +4011,7 @@ function RoomSearch({
       <PageHeader
         title="Room Search"
         description="Search room code, name, campus, building, floor, type, owner, booking status, and capability with simple or advanced filters."
-        action={<button className="btn-secondary" onClick={() => downloadCsv('room-data-export.csv', filteredRooms)}><Download size={16} /> Export CSV</button>}
+        action={<button className="btn-secondary" onClick={() => downloadCsv('room-data-export.csv', roomsToCsvRows(filteredRooms, attributes))}><Download size={16} /> Export CSV</button>}
       />
       <div className="panel rounded-lg p-4">
         <div className="grid gap-3 lg:grid-cols-[1.4fr_1fr_1fr_0.7fr_1fr]">
