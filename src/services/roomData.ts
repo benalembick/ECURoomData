@@ -124,6 +124,22 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
     return result;
   };
 
+  const loadDatasetParallel = async <T>(
+    createQuery: () => {
+      range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+    },
+    getCount: () => PromiseLike<{ count: number | null; error: { message: string } | null }>,
+    label: string,
+  ) => {
+    reportProgress(`Loading ${label}`, 5 + (completedSteps / totalSteps) * 80);
+    const result = await loadAllRowsParallel(createQuery, getCount, label, (loadedRows) => {
+      reportProgress(`Loading ${label} (${loadedRows.toLocaleString()} rows)`, 5 + (completedSteps / totalSteps) * 80, loadedRows);
+    });
+    completedSteps += 1;
+    reportProgress(`Loaded ${label}`, 5 + (completedSteps / totalSteps) * 80, result.data.length);
+    return result;
+  };
+
   const [campusResult, buildingResult, patternResult, attributeGroupResult, attributeResult, roomResult, valueResult, mappingResult] = await Promise.all([
     loadDataset(() => client.from('campuses').select('code,name,address').eq('is_active', true).order('code'), 'campuses'),
     loadDataset(() => client.from('buildings').select('code,name,owner,campuses(code)').eq('is_active', true).order('code'), 'buildings'),
@@ -179,8 +195,9 @@ export async function loadRoomDataFromSupabase(onProgress?: (progress: RoomDataL
           .order('room_code'),
       'rooms',
     ),
-    loadDataset(
+    loadDatasetParallel(
       () => client.from('room_attribute_values').select('room_id,attribute_definition_id,value'),
+      () => client.from('room_attribute_values').select('room_id', { count: 'exact', head: true }),
       'room attribute values',
     ),
     loadDataset(() => client.from('system_mappings').select('room_id,systems(name)'), 'system mappings'),
@@ -345,6 +362,47 @@ async function loadAllRows<T>(
     rows.push(...page);
     onPage?.(rows.length);
     if (page.length < pageSize) break;
+  }
+
+  return { data: rows, error: null };
+}
+
+// Parallel variant: fetches count first, then fires all pages simultaneously.
+// Dramatically faster for large tables (e.g. 68k rows = 68 sequential→parallel requests).
+async function loadAllRowsParallel<T>(
+  createQuery: () => {
+    range: (from: number, to: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>;
+  },
+  getCount: () => PromiseLike<{ count: number | null; error: { message: string } | null }>,
+  label: string,
+  onPage?: (loadedRows: number) => void,
+) {
+  const pageSize = 1000;
+
+  const { count, error: countError } = await getCount();
+  if (countError) throw new Error(`Could not count ${label}: ${countError.message}`);
+  if (!count) return { data: [] as T[], error: null };
+
+  let loadedRows = 0;
+  const pageCount = Math.ceil(count / pageSize);
+
+  const results = await Promise.all(
+    Array.from({ length: pageCount }, (_, i) => {
+      const from = i * pageSize;
+      return createQuery()
+        .range(from, from + pageSize - 1)
+        .then((result) => {
+          loadedRows += result.data?.length ?? 0;
+          onPage?.(loadedRows);
+          return result;
+        });
+    }),
+  );
+
+  const rows: T[] = [];
+  for (const result of results) {
+    if (result.error) throw new Error(`Could not load ${label}: ${result.error.message}`);
+    rows.push(...(result.data ?? []));
   }
 
   return { data: rows, error: null };
